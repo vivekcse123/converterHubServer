@@ -1,65 +1,36 @@
-"use strict";
-
+﻿"use strict";
 const mongoose = require("mongoose");
+const { ALL_TOOLS } = require("../config/constants");
 
-const conversionHistorySchema = new mongoose.Schema(
-  {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      index: true,
-    },
-    // Anonymous session id for unauthenticated users
-    sessionId: {
-      type: String,
-      index: true,
-    },
-    tool: {
-      type: String,
-      required: true,
-      enum: [
-        "image-to-pdf",
-        "pdf-to-word",
-        "word-to-pdf",
-        "pdf-merge",
-        "pdf-split",
-        "pdf-compress",
-        "image-resize",
-        "image-compress",
-        "image-convert",
-        "text-to-pdf",
-        "create-zip",
-      ],
-    },
-    status: {
-      type: String,
-      enum: ["pending", "processing", "completed", "failed"],
-      default: "pending",
-    },
-    inputFiles: [
-      {
-        originalName: String,
-        size: Number, // bytes
-        mimeType: String,
-      },
-    ],
-    outputFile: {
-      fileName: String,
-      size: Number,
-      url: String,
-    },
-    errorMessage: String,
-    processingTimeMs: Number,
-    ipAddress: String,
-  },
-  {
-    timestamps: true,
-    // Auto-expire documents after 30 days
-    expireAfterSeconds: 2_592_000,
-  },
-);
+const conversionHistorySchema = new mongoose.Schema({
+  user:      { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+  sessionId: { type: String, index: true },
+  tool: { type: String, required: true, enum: ALL_TOOLS },
+  status: { type: String, enum: ["pending","processing","completed","failed","cancelled"], default: "pending" },
 
-// Compound index for user history queries
+  inputFiles: [{ originalName: String, size: Number, mimeType: String }],
+  outputFile: { fileName: String, size: Number, url: String },
+
+  errorMessage:     String,
+  processingTimeMs: Number,
+  ipAddress:        String,
+
+  // Async job reference
+  jobId: { type: mongoose.Schema.Types.ObjectId, ref: "Job" },
+
+  // AI-specific metadata
+  aiTokensUsed: Number,
+
+  // File sizes for analytics
+  inputSizeBytes:  Number,
+  outputSizeBytes: Number,
+}, { timestamps: true });
+
 conversionHistorySchema.index({ user: 1, createdAt: -1 });
+conversionHistorySchema.index({ tool: 1, createdAt: -1 });
+conversionHistorySchema.index({ status: 1 });
+
+// TTL: 30 days
+conversionHistorySchema.index({ createdAt: 1 }, { expireAfterSeconds: 2_592_000 });
 
 module.exports = mongoose.model("ConversionHistory", conversionHistorySchema);
