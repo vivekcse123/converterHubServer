@@ -10,43 +10,64 @@ const { ensureDirectories } = require("./src/config/constants");
 
 const PORT = process.env.PORT || 5000;
 
+// 🔥 Catch ALL unexpected errors (VERY IMPORTANT)
+process.on("uncaughtException", (err) => {
+  console.error("💥 UNCAUGHT EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 UNHANDLED REJECTION:", reason);
+  // ❌ DO NOT exit immediately during debugging
+});
+
 const startServer = async () => {
   try {
-    // Ensure upload / output directories exist before anything runs
+    console.log("🚀 Starting server...");
+
+    // Ensure upload / output directories exist
     await ensureDirectories();
+    console.log("✅ Directories ready");
 
     // Connect to MongoDB
     await connectDB();
+    console.log("✅ MongoDB connected");
 
     // Start HTTP server
     const server = app.listen(PORT, () => {
-      logger.info(`🚀  Converter Hub API  →  http://localhost:${PORT}`);
-      logger.info(`📡  Environment: ${process.env.NODE_ENV || "development"}`);
+      logger.info(`🚀 Converter Hub API → http://localhost:${PORT}`);
+      logger.info(
+        `📡 Environment: ${process.env.NODE_ENV || "development"}`
+      );
     });
 
-    // Schedule periodic cleanup of expired temp files
-    scheduleFileCleanup();
+    // 🧪 Wrap cleanup in try-catch (common crash source)
+    try {
+      scheduleFileCleanup();
+      console.log("🧹 File cleanup scheduler started");
+    } catch (err) {
+      console.error("⚠️ File cleanup failed:", err);
+    }
 
     // ─── Graceful Shutdown ─────────────────────────
     const shutdown = (signal) => {
       logger.info(`${signal} received — shutting down gracefully…`);
+
       server.close(() => {
         logger.info("HTTP server closed");
         process.exit(0);
       });
-      // Force exit after 10 s if server hasn't closed
-      setTimeout(() => process.exit(1), 10_000);
+
+      // Force exit after 10 seconds
+      setTimeout(() => {
+        logger.error("Forcing shutdown...");
+        process.exit(1);
+      }, 10000);
     };
 
     process.on("SIGTERM", () => shutdown("SIGTERM"));
     process.on("SIGINT", () => shutdown("SIGINT"));
-
-    process.on("unhandledRejection", (reason) => {
-      logger.error("Unhandled Rejection:", reason);
-      process.exit(1);
-    });
   } catch (err) {
-    logger.error("Failed to start server:", err);
+    console.error("💥 Failed to start server:", err);
     process.exit(1);
   }
 };
