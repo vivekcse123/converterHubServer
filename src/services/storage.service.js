@@ -32,7 +32,7 @@ const PRESIGNED_EXPIRES =
 
 // ── Local storage helpers ────────────────────────────────────────────────────
 const localUrl = (req, fileName) =>
-  `${req?.protocol || "http"}://${req?.get?.("host") || "localhost:5000"}/outputs/${fileName}`;
+  `${req?.protocol || "http"}://${req?.get?.("host") || "localhost:3000"}/outputs/${fileName}`;
 
 // ── S3 helpers ───────────────────────────────────────────────────────────────
 const uploadToS3 = async (filePath, s3Key) => {

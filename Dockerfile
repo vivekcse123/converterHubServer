@@ -29,5 +29,5 @@ COPY . .
 RUN mkdir -p uploads outputs logs uploads/temp .tessdata && \
     chmod -R 755 uploads outputs logs
 
-EXPOSE 5000
+EXPOSE 3000
 CMD ["node", "server.js"]
