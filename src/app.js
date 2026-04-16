@@ -26,11 +26,37 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
+// app.use(cors({
+//   origin: [
+//     (
+//       "https://converter-hub-eight.vercel.app",
+//       "http://localhost:4200"
+//     )
+//   ],
+//   credentials:  true,
+//   methods:      ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+//   allowedHeaders: ["Content-Type","Authorization","X-Session-ID"],
+// }));
+
+// ── CORS ─────────────────────────────────────────────────────────────────────
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+// Fall back to hardcoded list when env var is absent (local dev)
+const corsOrigins = allowedOrigins.length
+  ? allowedOrigins
+  : [
+      'http://localhost:4200',
+      'https://converter-hub-eight.vercel.app',
+    ];
+
 app.use(cors({
-  origin: [(process.env.CORS_ORIGIN || "http://localhost:4200").split(",")],
-  credentials:  true,
-  methods:      ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization","X-Session-ID"],
+  origin: corsOrigins,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
 
 // ── Compression & Parsing ─────────────────────────────────────────────────────
