@@ -13,7 +13,8 @@ const authRoutes      = require("./routes/auth.routes");
 const converterRoutes = require("./routes/converter.routes");
 const historyRoutes   = require("./routes/history.routes");
 const adminRoutes     = require("./routes/admin.routes");
-const aiRoutes        = require("./routes/ai.routes");
+// AI routes disabled — no OpenAI key configured
+// const aiRoutes     = require("./routes/ai.routes");
 const jobsRoutes      = require("./routes/jobs.routes");
 const logger          = require("./utils/logger");
 
@@ -65,7 +66,7 @@ app.use("/api/auth",    authRoutes);
 app.use("/api/convert", converterRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/admin",   adminRoutes);
-app.use("/api/ai",      aiRoutes);
+// app.use("/api/ai",   aiRoutes);  // disabled — no OpenAI key
 app.use("/api/jobs",    jobsRoutes);
 
 // ── Error Handlers ────────────────────────────────────────────────────────────

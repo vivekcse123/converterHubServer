@@ -10,7 +10,7 @@ const { ensureDirectories }    = require("./src/config/constants");
 const { initSocket }           = require("./sockets/index");
 const { initQueue }            = require("./src/services/queue.service");
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3000;
 
 process.on("uncaughtException",  (err) => logger.error("UNCAUGHT EXCEPTION:", err));
 process.on("unhandledRejection", (reason) => logger.error("UNHANDLED REJECTION:", reason));

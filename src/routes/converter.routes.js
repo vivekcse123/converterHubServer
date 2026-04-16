@@ -27,6 +27,7 @@ router.post("/watermark-pdf",    ctrl.watermarkPdf);
 router.post("/sign-pdf",         ctrl.signPdf);
 router.post("/redact-pdf",       ctrl.redactPdf);
 router.post("/page-numbers",     ctrl.addPageNumbers);
+router.post("/add-page-numbers", ctrl.addPageNumbers);
 router.post("/pdf-to-pdfa",      ctrl.pdfToPdfa);
 router.post("/compare-pdfs",     ctrl.comparePdfs);
 router.post("/ocr",              ctrl.performOcr);
