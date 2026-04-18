@@ -38,6 +38,7 @@ router.get("/analytics/overview", admin.getAnalyticsOverview);
 router.get("/analytics/tools", admin.getToolStats);
 router.get("/analytics/daily", admin.getDailyStats);
 router.get("/analytics/subscriptions", admin.getSubscriptionStats);
+router.get("/analytics/trending", admin.getTrendingConverters);
 
 // ── Queue & Jobs ─────────────────────────────────────────────────────────────
 router.get("/queue/stats", admin.getQueueStats);

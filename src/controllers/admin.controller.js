@@ -435,6 +435,42 @@ const updatePlan = async (req, res, next) => {
   }
 };
 
+// ── Trending Converters (public-facing, called from frontend) ─────────────────
+
+// GET /api/converters/trending?limit=10&days=7
+const getTrendingConverters = async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    const days = Math.min(parseInt(req.query.days, 10) || 7, 90);
+    const since = new Date(Date.now() - days * 86_400_000);
+
+    const trending = await ConversionHistory.aggregate([
+      { $match: { createdAt: { $gte: since }, status: "completed" } },
+      {
+        $group: {
+          _id: "$tool",
+          count: { $sum: 1 },
+          lastUsed: { $max: "$createdAt" },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: limit },
+      {
+        $project: {
+          _id: 0,
+          tool: "$_id",
+          count: 1,
+          lastUsed: 1,
+        },
+      },
+    ]);
+
+    success(res, { trending, days });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   getUsers,
   getUser,
@@ -457,4 +493,5 @@ module.exports = {
   getErrorLogs,
   getPlans,
   updatePlan,
+  getTrendingConverters,
 };
