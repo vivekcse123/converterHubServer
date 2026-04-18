@@ -13,7 +13,7 @@ const getClient = () => {
 };
 
 const FROM = () =>
-  process.env.RESEND_FROM_EMAIL || "Converter Hub <noreply@converterhub.app>";
+  process.env.RESEND_FROM_EMAIL || "ApnaConverter <onboarding@resend.dev>";
 
 /**
  * Send a welcome email to a newly registered user.
@@ -21,13 +21,13 @@ const FROM = () =>
  */
 const sendWelcomeEmail = async (user) => {
   const client = getClient();
-  if (!client) return; // silently skip if key not configured
+  if (!client) { logger.warn("Welcome email skipped — RESEND_API_KEY not set"); return; }
 
   try {
     await client.emails.send({
       from: FROM(),
       to: user.email,
-      subject: "Welcome to Converter Hub! 🎉",
+      subject: "Welcome to ApnaConverter! 🎉",
       html: buildWelcomeHtml(user.name),
     });
     logger.info(`Welcome email sent to ${user.email}`);
@@ -45,7 +45,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Welcome to Converter Hub</title>
+  <title>Welcome to ApnaConverter</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f6f9;font-family:'Segoe UI',Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:40px 0;">
@@ -61,7 +61,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
                         padding:40px 48px;text-align:center;">
               <h1 style="margin:0;color:#ffffff;font-size:28px;font-weight:700;
                           letter-spacing:-0.5px;">
-                ✨ Converter Hub
+                ✨ ApnaConverter
               </h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:15px;">
                 Universal File Conversion Platform
@@ -76,7 +76,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
                 Welcome aboard, ${escapeHtml(name)}! 👋
               </h2>
               <p style="margin:0 0 20px;color:#4b5563;font-size:16px;line-height:1.6;">
-                Your account is all set. Here's what you can do with Converter Hub:
+                Your account is all set. Here's what you can do with ApnaConverter:
               </p>
 
               <!-- Feature list -->
@@ -109,7 +109,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
             <td style="background:#f9fafb;padding:24px 48px;text-align:center;
                         border-top:1px solid #e5e7eb;">
               <p style="margin:0;color:#9ca3af;font-size:13px;line-height:1.5;">
-                You're receiving this email because you created an account at Converter Hub.<br/>
+                You're receiving this email because you created an account at ApnaConverter.<br/>
                 Questions? Reply to this email — we're happy to help.
               </p>
             </td>
