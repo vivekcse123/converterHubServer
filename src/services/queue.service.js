@@ -1,6 +1,6 @@
 "use strict";
 const { Queue, Worker, QueueEvents } = require("bullmq");
-const { getRedisConnection } = require("../config/redis");
+const { getRedisConnection, isRedisAvailable } = require("../config/redis");
 const logger = require("../utils/logger");
 
 let conversionQueue = null;
@@ -10,6 +10,12 @@ let isQueueAvailable = false;
 const QUEUE_NAME = "conversion";
 
 const initQueue = async () => {
+  const available = await isRedisAvailable();
+  if (!available) {
+    logger.warn("Redis unavailable — running in sync mode (no queue).");
+    isQueueAvailable = false;
+    return false;
+  }
   try {
     const connection = getRedisConnection();
     conversionQueue = new Queue(QUEUE_NAME, {
@@ -27,7 +33,7 @@ const initQueue = async () => {
     return true;
   } catch (err) {
     logger.warn(
-      "Queue unavailable (Redis offline) — running in sync mode:",
+      "Queue unavailable — running in sync mode:",
       err.message,
     );
     isQueueAvailable = false;
