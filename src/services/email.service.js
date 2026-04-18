@@ -8,11 +8,11 @@ let _transporter = null;
 const getTransporter = () => {
   if (_transporter) return _transporter;
 
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const user = process.env.MAIL_USER || process.env.SMTP_USER;
+  const pass = process.env.MAIL_PASS || process.env.SMTP_PASS;
 
   if (!user || !pass) {
-    logger.warn("Email skipped — SMTP_USER / SMTP_PASS not configured");
+    logger.warn("Email skipped — MAIL_USER / MAIL_PASS not configured");
     return null;
   }
 
@@ -25,7 +25,7 @@ const getTransporter = () => {
 };
 
 const FROM = () =>
-  process.env.SMTP_FROM || `ApnaConverter <${process.env.SMTP_USER}>`;
+  process.env.SMTP_FROM || `ApnaConverter <${process.env.MAIL_USER || process.env.SMTP_USER}>`;
 
 /**
  * Send a welcome email to a newly registered user.
