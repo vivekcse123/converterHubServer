@@ -73,7 +73,7 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(
   morgan("combined", {
     stream: { write: (msg) => logger.http(msg.trim()) },
-    skip: (req) => req.url === "/health",
+    skip: (req) => req.url === "/health" || req.url === "/ping",
   }),
 );
 
@@ -100,6 +100,9 @@ app.get("/health", (_req, res) => {
     version: process.env.npm_package_version || "2.0.0",
   });
 });
+
+// ── Keep-alive ping ───────────────────────────────────────────────────────────
+app.get("/ping", (_req, res) => res.json({ pong: true, ts: Date.now() }));
 
 // ── API Routes ────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
