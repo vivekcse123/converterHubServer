@@ -22,7 +22,7 @@ const imagesToPdf = async (imagePaths, opts = {}) => {
   const [pw, ph] = PAGE_SIZES[pageSize] || PAGE_SIZES.A4;
 
   for (const imgPath of imagePaths) {
-    // Convert to JPEG via sharp for universal compatibility
+    
     const jpegBuf = await sharp(imgPath).jpeg({ quality: 90 }).toBuffer();
     const embImg = await pdfDoc.embedJpg(jpegBuf);
 
