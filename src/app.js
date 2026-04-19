@@ -57,6 +57,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
 const corsOrigins = [
   "http://localhost:4200",
   "https://converter-hub-eight.vercel.app",
+  "https://www.apnaconverter.com",
+  "https://apnaconverter.com",
   ...allowedOrigins,
 ];
 
