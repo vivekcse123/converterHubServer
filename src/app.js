@@ -80,13 +80,19 @@ app.use(
 // ── Rate Limiting ─────────────────────────────────────────────────────────────
 app.use("/api/", globalRateLimiter);
 
-// ── Static Files ──────────────────────────────────────────────────────────────
+// ── Static Files (output downloads) ──────────────────────────────────────────
 app.use(
   "/outputs",
   express.static(path.join(__dirname, "..", "outputs"), {
-    setHeaders: (res) => {
+    setHeaders: (res, filePath) => {
+      const fileName = require("path").basename(filePath);
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "no-store");
+      // Allow cross-origin fetch (needed for blob download on Vercel → Render)
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+      // Force browser to download rather than display inline
+      res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     },
   }),
 );
