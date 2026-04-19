@@ -24,6 +24,9 @@ const logger = require("./utils/logger");
 
 const app = express();
 
+// Trust Render/Vercel reverse proxy so req.protocol returns https
+app.set("trust proxy", 1);
+
 // ── Security ─────────────────────────────────────────────────────────────────
 app.use(
   helmet({
@@ -50,10 +53,12 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .map((o) => o.trim())
   .filter(Boolean);
 
-// Fall back to hardcoded list when env var is absent (local dev)
-const corsOrigins = allowedOrigins.length
-  ? allowedOrigins
-  : ["http://localhost:4200", "https://converter-hub-eight.vercel.app"];
+// Always include these origins; env var can add more
+const corsOrigins = [
+  "http://localhost:4200",
+  "https://converter-hub-eight.vercel.app",
+  ...allowedOrigins,
+];
 
 app.use(
   cors({
@@ -85,13 +90,10 @@ app.use(
   "/outputs",
   express.static(path.join(__dirname, "..", "outputs"), {
     setHeaders: (res, filePath) => {
-      const fileName = require("path").basename(filePath);
+      const fileName = path.basename(filePath);
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "no-store");
-      // Allow cross-origin fetch (needed for blob download on Vercel → Render)
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-      // Force browser to download rather than display inline
+      // Force browser to download (not display inline) — works with window.open()
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     },
   }),
