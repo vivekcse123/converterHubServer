@@ -1,40 +1,50 @@
 "use strict";
 
-const { Resend } = require("resend");
+const nodemailer = require("nodemailer");
 const logger = require("../utils/logger");
 
-// Lazy client — only instantiated when a key is available at send-time
-let _resend = null;
-const getClient = () => {
-  if (!_resend && process.env.RESEND_API_KEY) {
-    _resend = new Resend(process.env.RESEND_API_KEY);
+let _transporter = null;
+
+const getTransporter = () => {
+  if (_transporter) return _transporter;
+
+  const user = process.env.MAIL_USER || process.env.SMTP_USER;
+  const pass = process.env.MAIL_PASS || process.env.SMTP_PASS;
+
+  if (!user || !pass) {
+    logger.warn("Email skipped — MAIL_USER / MAIL_PASS not configured");
+    return null;
   }
-  return _resend;
+
+  _transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user, pass },
+  });
+
+  return _transporter;
 };
 
 const FROM = () =>
-  process.env.RESEND_FROM_EMAIL || "Converter Hub <noreply@converterhub.app>";
+  process.env.SMTP_FROM || `ApnaConverter <${process.env.MAIL_USER || process.env.SMTP_USER}>`;
 
 /**
  * Send a welcome email to a newly registered user.
- * Fire-and-forget — errors are logged but never propagate.
+ * Fire-and-forget — never blocks the registration response.
  */
 const sendWelcomeEmail = async (user) => {
-  const client = getClient();
-  if (!client) return; // silently skip if key not configured
+  const transporter = getTransporter();
+  if (!transporter) return;
 
   try {
-    await client.emails.send({
+    await transporter.sendMail({
       from: FROM(),
       to: user.email,
-      subject: "Welcome to Converter Hub! 🎉",
+      subject: "Welcome to ApnaConverter! 🎉",
       html: buildWelcomeHtml(user.name),
     });
     logger.info(`Welcome email sent to ${user.email}`);
   } catch (err) {
-    logger.warn(
-      `Failed to send welcome email to ${user.email}: ${err.message}`,
-    );
+    logger.warn(`Failed to send welcome email to ${user.email}: ${err.message}`);
   }
 };
 
@@ -45,7 +55,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Welcome to Converter Hub</title>
+  <title>Welcome to ApnaConverter</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f6f9;font-family:'Segoe UI',Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:40px 0;">
@@ -61,7 +71,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
                         padding:40px 48px;text-align:center;">
               <h1 style="margin:0;color:#ffffff;font-size:28px;font-weight:700;
                           letter-spacing:-0.5px;">
-                ✨ Converter Hub
+                ✨ ApnaConverter
               </h1>
               <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:15px;">
                 Universal File Conversion Platform
@@ -76,15 +86,14 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
                 Welcome aboard, ${escapeHtml(name)}! 👋
               </h2>
               <p style="margin:0 0 20px;color:#4b5563;font-size:16px;line-height:1.6;">
-                Your account is all set. Here's what you can do with Converter Hub:
+                Your account is all set. Here's what you can do with ApnaConverter:
               </p>
 
-              <!-- Feature list -->
               <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 32px;">
                 ${featureRow("🖼️", "Image Conversion", "Convert between JPG, PNG, WebP, AVIF and more.")}
                 ${featureRow("📄", "PDF Tools", "Merge, split, compress and convert PDFs instantly.")}
                 ${featureRow("📊", "Office Documents", "Transform Word, Excel and PowerPoint files with ease.")}
-                ${featureRow("🔊", "Audio & Video", "Transcode media files in the browser — no upload needed.")}
+                ${featureRow("🗜️", "File Compression", "Reduce file sizes without losing quality.")}
               </table>
 
               <!-- CTA -->
@@ -109,7 +118,7 @@ const buildWelcomeHtml = (name) => `<!DOCTYPE html>
             <td style="background:#f9fafb;padding:24px 48px;text-align:center;
                         border-top:1px solid #e5e7eb;">
               <p style="margin:0;color:#9ca3af;font-size:13px;line-height:1.5;">
-                You're receiving this email because you created an account at Converter Hub.<br/>
+                You're receiving this because you created an account at ApnaConverter.<br/>
                 Questions? Reply to this email — we're happy to help.
               </p>
             </td>
@@ -139,7 +148,6 @@ const featureRow = (icon, title, desc) => `
     </td>
   </tr>`;
 
-/** Basic HTML-escape to prevent XSS in the name field */
 const escapeHtml = (str) =>
   String(str)
     .replace(/&/g, "&amp;")
