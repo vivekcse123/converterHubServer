@@ -58,8 +58,11 @@ const logConversion = async (
   }
 };
 
-const buildDownloadUrl = (req, fileName) =>
-  `${req.protocol}://${req.get("host")}/outputs/${fileName}`;
+const buildDownloadUrl = (req, fileName) => {
+  const base = process.env.BACKEND_URL ||
+    `${req.headers["x-forwarded-proto"] || req.protocol}://${req.headers["x-forwarded-host"] || req.get("host")}`;
+  return `${base}/outputs/${fileName}`;
+};
 
 const cleanup = (filePath) => deleteFile(filePath);
 
