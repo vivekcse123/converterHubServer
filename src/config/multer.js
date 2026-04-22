@@ -46,6 +46,16 @@ const uploadMultiple = multer({
   limits: { fileSize: MAX_FILE_SIZE, files: 20 },
 }).array("files", 20);
 
+/** Fields upload for sign-pdf (main PDF + optional signature image) */
+const uploadSignFields = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: MAX_FILE_SIZE, files: 2 },
+}).fields([
+  { name: "file", maxCount: 1 },
+  { name: "signatureImage", maxCount: 1 },
+]);
+
 /** Promisified wrappers so controllers can use async/await */
 const handleSingleUpload = (req, res) =>
   new Promise((resolve, reject) => {
@@ -57,4 +67,9 @@ const handleMultipleUpload = (req, res) =>
     uploadMultiple(req, res, (err) => (err ? reject(err) : resolve()));
   });
 
-module.exports = { handleSingleUpload, handleMultipleUpload };
+const handleSignUpload = (req, res) =>
+  new Promise((resolve, reject) => {
+    uploadSignFields(req, res, (err) => (err ? reject(err) : resolve()));
+  });
+
+module.exports = { handleSingleUpload, handleMultipleUpload, handleSignUpload };

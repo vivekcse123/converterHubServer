@@ -71,6 +71,16 @@ app.use(
   }),
 );
 
+// ── Request timeout (5 min — enough for large file conversions) ───────────────
+app.use((req, res, next) => {
+  res.setTimeout(5 * 60 * 1_000, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ success: false, message: "Request timed out." });
+    }
+  });
+  next();
+});
+
 // ── Compression & Parsing ─────────────────────────────────────────────────────
 app.use(compression());
 app.use(express.json({ limit: "10mb" }));
@@ -94,8 +104,9 @@ app.use(
     setHeaders: (res, filePath) => {
       const fileName = path.basename(filePath);
       res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Cache-Control", "no-store");
-      // Force browser to download (not display inline) — works with window.open()
+      // Allow browsers to cache output files for 10 minutes so re-downloads
+      // are instant; files are UUID-named so there is no stale-cache risk.
+      res.setHeader("Cache-Control", "private, max-age=600");
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     },
   }),

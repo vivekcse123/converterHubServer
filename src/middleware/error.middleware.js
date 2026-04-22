@@ -47,14 +47,18 @@ const errorHandler = (err, req, res, _next) => {
     });
   }
 
-  // Default 500
   const statusCode = err.statusCode || err.status || 500;
+
+  // 4xx errors are user-facing: always include the message so the frontend
+  // can display actionable feedback (e.g. "Incorrect password").
+  // 5xx errors redact internals in production.
+  const isClientError = statusCode >= 400 && statusCode < 500;
   res.status(statusCode).json({
     success: false,
     message:
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : err.message,
+      isClientError || process.env.NODE_ENV !== "production"
+        ? err.message
+        : "Internal server error",
   });
 };
 

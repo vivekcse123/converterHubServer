@@ -239,14 +239,31 @@ module.exports = {
 async function unlockPdf(pdfPath, password = "") {
   const srcBytes = await fse.readFile(pdfPath);
   let pdfDoc;
+
   try {
     pdfDoc = await PDFDocument.load(srcBytes, {
       password,
       ignoreEncryption: false,
     });
-  } catch {
-    // Try loading ignoring encryption as a fallback (copies pages only)
-    pdfDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+  } catch (loadErr) {
+    if (password) {
+      // Password was provided but didn't match
+      const e = new Error(
+        "Incorrect password. Please verify the password and try again.",
+      );
+      e.statusCode = 400;
+      throw e;
+    }
+    // No password supplied — try stripping owner-only permissions lock
+    try {
+      pdfDoc = await PDFDocument.load(srcBytes, { ignoreEncryption: true });
+    } catch {
+      const e = new Error(
+        "This PDF is password-protected. Please supply the correct password.",
+      );
+      e.statusCode = 400;
+      throw e;
+    }
   }
 
   const newDoc = await PDFDocument.create();
@@ -263,47 +280,94 @@ async function unlockPdf(pdfPath, password = "") {
 
 // ─── Protect PDF ─────────────────────────────────────────────────────────────
 /**
- * Add user-password protection to a PDF using pdf-lib encryption via low-level save.
- * Since pdf-lib does not natively encrypt, we add a watermark-based protection
- * marker and lock permissions by embedding metadata. For real encryption, Ghostscript
- * should be used if available; here we layer a visible protection notice instead.
+ * Add real password protection to a PDF.
+ * Strategy:
+ *   1. Try qpdf binary (AES-256, preserves all content)
+ *   2. Fall back to pdfkit v0.15 with userPassword/ownerPassword (AES-128)
+ *      — extracts text via pdf-parse and recreates the document.
+ *
  * @param {string} pdfPath
  * @param {string} userPassword
  * @param {string} [ownerPassword]
  */
 async function protectPdf(pdfPath, userPassword, ownerPassword) {
-  // pdf-lib v1.x does not support AES/RC4 encryption natively.
-  // We use a functional approach: add a visible "password protected" page stamp
-  // and write an application/x-passwordprotected flag in metadata so the frontend
-  // knows to prompt re-entry. This keeps the pipeline Node-only without binaries.
-  const srcBytes = await fse.readFile(pdfPath);
-  const pdfDoc = await PDFDocument.load(srcBytes);
-  const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-  const pages = pdfDoc.getPages();
-  for (const page of pages) {
-    const { width, height } = page.getSize();
-    // Subtle top-right stamp
-    page.drawText(`🔒 Protected`, {
-      x: width - 110,
-      y: height - 22,
-      size: 9,
-      font,
-      color: rgb(0.6, 0.6, 0.6),
-      opacity: 0.5,
-    });
-  }
-
-  // Embed password hint in document metadata (informational only)
-  pdfDoc.setKeywords([`protected:true`, `hint:${userPassword.slice(0, 0)}`]);
-  pdfDoc.setCreator("Converter Hub — Password Protected");
-
-  const pdfBytes = await pdfDoc.save({ useObjectStreams: true });
+  const op = ownerPassword || userPassword;
   const fileName = `protected-${uuidv4()}.pdf`;
   const outputPath = path.join(OUTPUT_DIR, fileName);
-  await fse.writeFile(outputPath, pdfBytes);
+
+  // ── Attempt 1: qpdf (AES-256, layout preserved) ──────────────────────────
+  const qpdfAvailable = await checkBinary("qpdf");
+  if (qpdfAvailable) {
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    const execFileAsync = promisify(execFile);
+    await execFileAsync(
+      "qpdf",
+      ["--encrypt", userPassword, op, "256", "--", pdfPath, outputPath],
+      { timeout: 30_000 },
+    );
+    const stat = await fse.stat(outputPath);
+    return { outputPath, fileName, size: stat.size, method: "aes256" };
+  }
+
+  // ── Attempt 2: pdfkit AES-128 (text-based, layout not preserved) ─────────
+  const pdfParse = require("pdf-parse");
+  let textContent = "";
+  try {
+    const srcBytes = await fse.readFile(pdfPath);
+    const data = await pdfParse(srcBytes);
+    textContent = data.text || "";
+  } catch {
+    // If parsing fails (already encrypted?), use a placeholder
+    textContent =
+      "[Original PDF content could not be extracted for text-mode encryption.]";
+  }
+
+  await new Promise((resolve, reject) => {
+    const doc = new PDFKit({
+      userPassword,
+      ownerPassword: op,
+      permissions: {
+        printing: "highResolution",
+        modifying: false,
+        copying: false,
+        annotating: false,
+        fillingForms: false,
+        contentAccessibility: true,
+        documentAssembly: false,
+      },
+      margin: 50,
+      info: { Creator: "Converter Hub", Producer: "Converter Hub" },
+    });
+    const stream = fse.createWriteStream(outputPath);
+    doc.pipe(stream);
+    doc
+      .font("Helvetica")
+      .fontSize(11)
+      .fillColor("#222222")
+      .text(textContent, { align: "left", lineGap: 3 });
+    doc.end();
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+  });
+
   const stat = await fse.stat(outputPath);
-  return { outputPath, fileName, size: stat.size };
+  return { outputPath, fileName, size: stat.size, method: "aes128-text" };
+}
+
+/** Check if a CLI binary is available on PATH. Cached after first call. */
+const _binaryCache = {};
+async function checkBinary(name) {
+  if (name in _binaryCache) return _binaryCache[name];
+  try {
+    const { execFile } = require("child_process");
+    const { promisify } = require("util");
+    await promisify(execFile)(name, ["--version"], { timeout: 5_000 });
+    _binaryCache[name] = true;
+  } catch {
+    _binaryCache[name] = false;
+  }
+  return _binaryCache[name];
 }
 
 // ─── Organize PDF (delete / reorder pages) ───────────────────────────────────

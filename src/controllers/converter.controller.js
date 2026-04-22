@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 const {
   handleSingleUpload,
   handleMultipleUpload,
+  handleSignUpload,
 } = require("../config/multer");
 const imageService = require("../services/image.service");
 const pdfService = require("../services/pdf.service");
@@ -393,7 +394,43 @@ const watermarkPdf = withSingle(
   (p, b) => advancedPdf.watermarkPdf(p, b),
   "watermark-pdf",
 );
-const signPdf = withSingle((p, b) => advancedPdf.signPdf(p, b), "sign-pdf");
+const signPdf = async (req, res, next) => {
+  const startMs = Date.now();
+  try {
+    await handleSignUpload(req, res);
+    const pdfFile = req.files?.file?.[0];
+    if (!pdfFile) return error(res, "No PDF file uploaded", 400);
+
+    // Read uploaded signature image and convert to base64 for the service
+    const sigFile = req.files?.signatureImage?.[0];
+    let signatureImage = req.body.signatureImage ?? null;
+    if (sigFile && !signatureImage) {
+      const imgBuf = await fse.readFile(sigFile.path);
+      const mimeType = sigFile.mimetype || "image/png";
+      signatureImage = `data:${mimeType};base64,${imgBuf.toString("base64")}`;
+    }
+
+    const result = await advancedPdf.signPdf(pdfFile.path, {
+      ...req.body,
+      signatureImage,
+    });
+
+    const out = {
+      fileName: result.fileName,
+      downloadUrl: buildDownloadUrl(req, result.fileName),
+      size: result.size,
+    };
+    await logConversion(req, "sign-pdf", [pdfFile], out, "completed", null, startMs);
+    cleanup(pdfFile.path);
+    if (sigFile) cleanup(sigFile.path);
+    success(res, out, "PDF signed successfully");
+  } catch (err) {
+    if (req.files?.file?.[0])           cleanup(req.files.file[0].path);
+    if (req.files?.signatureImage?.[0]) cleanup(req.files.signatureImage[0].path);
+    await logConversion(req, "sign-pdf", [], null, "failed", err.message, startMs);
+    next(err);
+  }
+};
 const redactPdf = withSingle(
   (p, b) =>
     advancedPdf.redactPdf(p, { regions: JSON.parse(b.regions || "[]") }),
