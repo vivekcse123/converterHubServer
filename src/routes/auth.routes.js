@@ -21,7 +21,9 @@ router.post(
   authRateLimiter,
   [
     body("name").trim().notEmpty().isLength({ min: 2, max: 50 }),
-    body("email").isEmail().normalizeEmail(),
+    // Use toLowerCase only — normalizeEmail() strips Gmail dots and breaks
+    // round-trip lookups for addresses like john.doe@gmail.com
+    body("email").isEmail().customSanitizer((v) => v.toLowerCase().trim()),
     body("password").isLength({ min: 8 }),
   ],
   validate,
@@ -31,7 +33,10 @@ router.post(
 router.post(
   "/login",
   authRateLimiter,
-  [body("email").isEmail().normalizeEmail(), body("password").notEmpty()],
+  [
+    body("email").isEmail().customSanitizer((v) => v.toLowerCase().trim()),
+    body("password").notEmpty(),
+  ],
   validate,
   login,
 );
