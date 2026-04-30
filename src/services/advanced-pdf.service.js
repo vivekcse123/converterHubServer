@@ -19,7 +19,7 @@ const saveDoc = async (pdfDoc, prefix = "output") => {
 // Uses pdfjs-dist (pure JS, no system dependencies) + canvas + sharp.
 const pdfToJpg = async (pdfPath, { dpi = 150, format = "jpg" } = {}) => {
   const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-  const { createCanvas } = require("@napi-rs/canvas");
+  const { createCanvas } = require("canvas");
   const sharp = require("sharp");
 
   // Disable Web Worker in Node.js — not supported
