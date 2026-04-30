@@ -16,64 +16,76 @@ const saveDoc = async (pdfDoc, prefix = "output") => {
 };
 
 // ── PDF to JPG (extract pages as images) ─────────────────────────────────────
-// Uses pdf2pic (requires ghostscript/ImageMagick in the system PATH).
-// Falls back gracefully if not available.
+// Uses pdfjs-dist (pure JS, no system dependencies) + canvas + sharp.
 const pdfToJpg = async (pdfPath, { dpi = 150, format = "jpg" } = {}) => {
-  try {
-    const { fromPath } = require("pdf2pic");
-    const outputFolder = path.join(OUTPUT_DIR, `pdf-pages-${uuidv4()}`);
-    await fse.ensureDir(outputFolder);
-    const convert = fromPath(pdfPath, {
-      density: parseInt(dpi),
-      savename: "page",
-      savedir: outputFolder,
-      format: format.toUpperCase(),
-      quality: 90,
-    });
-    // Get page count from PDF
-    const srcBytes = await fse.readFile(pdfPath);
-    const srcDoc = await PDFDocument.load(srcBytes);
-    const total = srcDoc.getPageCount();
-    const results = [];
-    for (let i = 1; i <= total; i++) {
-      const res = await convert(i, { responseType: "image" });
-      const stat = await fse.stat(res.path);
-      results.push({
-        fileName: path.basename(res.path),
-        path: res.path,
-        size: stat.size,
-        page: i,
-      });
+  const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+  const { createCanvas } = require("@napi-rs/canvas");
+  const sharp = require("sharp");
+
+  // Disable Web Worker in Node.js — not supported
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
+  const data = new Uint8Array(await fse.readFile(pdfPath));
+  const pdf = await pdfjsLib
+    .getDocument({ data, verbosity: 0, disableFontFace: true, isEvalSupported: false })
+    .promise;
+
+  const total = pdf.numPages;
+  const scale = Math.max(0.5, Math.min(4, parseInt(dpi) / 72));
+  const outputFolder = path.join(OUTPUT_DIR, `pdf-pages-${uuidv4()}`);
+  await fse.ensureDir(outputFolder);
+
+  const results = [];
+  for (let pageNum = 1; pageNum <= total; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const viewport = page.getViewport({ scale });
+    const w = Math.ceil(viewport.width);
+    const h = Math.ceil(viewport.height);
+
+    const canvas = createCanvas(w, h);
+    const ctx = canvas.getContext("2d");
+    // White background — required for JPEG (no alpha channel)
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    page.cleanup();
+
+    const ext = format === "png" ? "png" : format === "webp" ? "webp" : "jpg";
+    const fileName = `page-${String(pageNum).padStart(3, "0")}-${uuidv4()}.${ext}`;
+    const filePath = path.join(outputFolder, fileName);
+
+    const rawPng = canvas.toBuffer("image/png");
+    let buffer;
+    if (format === "png") {
+      buffer = rawPng;
+    } else if (format === "webp") {
+      buffer = await sharp(rawPng).webp({ quality: 90 }).toBuffer();
+    } else {
+      buffer = await sharp(rawPng).jpeg({ quality: 90 }).toBuffer();
     }
-    if (total === 1) {
-      // Return single image directly
-      return {
-        fileName: results[0].fileName,
-        outputPath: results[0].path,
-        size: results[0].size,
-        pages: 1,
-      };
-    }
-    // Zip multiple pages
-    const compressionService = require("./compression.service");
-    const zipResult = await compressionService.createZip(
-      results.map((r) => ({ filePath: r.path, archiveName: r.fileName })),
-    );
-    for (const r of results) await fse.remove(r.path).catch(() => {});
-    await fse.remove(outputFolder).catch(() => {});
-    return { ...zipResult, pages: total };
-  } catch (err) {
-    if (
-      err.code === "MODULE_NOT_FOUND" ||
-      err.message.includes("gm") ||
-      err.message.includes("ghostscript")
-    ) {
-      throw new Error(
-        "PDF to JPG requires Ghostscript/ImageMagick. Please install them on the server.",
-      );
-    }
-    throw err;
+
+    await fse.writeFile(filePath, buffer);
+    const stat = await fse.stat(filePath);
+    results.push({ fileName, path: filePath, size: stat.size, page: pageNum });
   }
+
+  if (total === 1) {
+    return {
+      fileName: results[0].fileName,
+      outputPath: results[0].path,
+      size: results[0].size,
+      pages: 1,
+    };
+  }
+
+  const compressionService = require("./compression.service");
+  const zipResult = await compressionService.createZip(
+    results.map((r) => ({ filePath: r.path, archiveName: r.fileName })),
+  );
+  for (const r of results) await fse.remove(r.path).catch(() => {});
+  await fse.remove(outputFolder).catch(() => {});
+  return { ...zipResult, pages: total };
 };
 
 // ── Watermark PDF ─────────────────────────────────────────────────────────────

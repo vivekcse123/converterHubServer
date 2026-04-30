@@ -32,9 +32,9 @@ const scheduleSelfPing = () => {
     });
   };
 
-  // Run every 10 minutes
-  cron.schedule("*/10 * * * *", ping);
-  logger.info(`Self-ping scheduled every 10 minutes → ${pingUrl}`);
+  // Run every 8 minutes — Render spins down after 15 min; 8-min cadence gives two pings of headroom
+  cron.schedule("*/8 * * * *", ping);
+  logger.info(`Self-ping scheduled every 8 minutes → ${pingUrl}`);
 };
 
 module.exports = { scheduleSelfPing };
