@@ -161,8 +161,9 @@ const escapeHtml = (str) =>
 const sendPasswordResetEmail = async (user, rawToken) => {
   const transporter = getTransporter();
   if (!transporter) {
-    logger.warn(`Password reset email skipped (no SMTP config) for ${user.email}`);
-    return;
+    const err = new Error('Email service not configured — set MAIL_USER and MAIL_PASS environment variables.');
+    logger.error(`Password reset email failed for ${user.email}: ${err.message}`);
+    throw err;
   }
 
   const resetUrl = `${process.env.APP_URL || 'https://www.apnaconverter.com'}/reset-password/${rawToken}`;
