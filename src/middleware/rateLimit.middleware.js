@@ -53,4 +53,34 @@ const conversionRateLimiter = rateLimit({
   },
 });
 
-module.exports = { globalRateLimiter, authRateLimiter, conversionRateLimiter };
+/** Strict limiter for password-reset requests — prevents email flooding & token enumeration */
+const passwordResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many password reset requests. Please try again in an hour.",
+  },
+});
+
+/** Token-refresh limiter — prevents brute-force against the refresh endpoint */
+const refreshRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many token refresh requests. Please try again later.",
+  },
+});
+
+module.exports = {
+  globalRateLimiter,
+  authRateLimiter,
+  conversionRateLimiter,
+  passwordResetLimiter,
+  refreshRateLimiter,
+};

@@ -7,6 +7,22 @@ const { success, error, paginated } = require("../utils/response");
 const logger = require("../utils/logger");
 const queueService = require("../services/queue.service");
 
+// Fields that must never appear in API responses even when using .lean()
+const SENSITIVE_FIELDS = ["password", "refreshTokens", "passwordResetToken", "passwordResetExpires"];
+const stripSensitive = (user) => {
+  if (!user) return user;
+  const u = { ...user };
+  SENSITIVE_FIELDS.forEach((f) => delete u[f]);
+  return u;
+};
+
+// Sanitise a search string: enforce string type, escape regex metacharacters,
+// limit length to prevent ReDoS.
+const sanitizeSearch = (raw) => {
+  if (!raw || typeof raw !== "string") return null;
+  return raw.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
 // ── User Management ──────────────────────────────────────────────────────────
 
 // GET /api/admin/users
@@ -15,7 +31,7 @@ const getUsers = async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip = (page - 1) * limit;
-    const search = req.query.search;
+    const search = sanitizeSearch(req.query.search);
     const role = req.query.role;
     const plan = req.query.plan;
     const status = req.query.status;
@@ -36,7 +52,7 @@ const getUsers = async (req, res, next) => {
       User.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       User.countDocuments(filter),
     ]);
-    paginated(res, users, total, page, limit);
+    paginated(res, users.map(stripSensitive), total, page, limit);
   } catch (err) {
     next(err);
   }
@@ -55,7 +71,7 @@ const getUser = async (req, res, next) => {
         .limit(10)
         .lean(),
     ]);
-    success(res, { user, totalConversions, recentActivity });
+    success(res, { user: stripSensitive(user), totalConversions, recentActivity });
   } catch (err) {
     next(err);
   }

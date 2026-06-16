@@ -73,7 +73,7 @@ const userSchema = new mongoose.Schema(
     refreshTokens: [
       { token: String, createdAt: { type: Date, default: Date.now } },
     ],
-    passwordResetToken: String,
+    passwordResetToken: { type: String, index: { sparse: true } },
     passwordResetExpires: Date,
 
     // Metadata

@@ -31,7 +31,18 @@ app.set("trust proxy", 1);
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
-    contentSecurityPolicy: false,
+    // API-only server — responses are JSON, not HTML. Use a restrictive CSP
+    // that blocks any accidental HTML rendering from injecting scripts.
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        scriptSrc:  ["'none'"],
+        objectSrc:  ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    // Tell clients to only connect over HTTPS for the next year
+    strictTransportSecurity: { maxAge: 31_536_000, includeSubDomains: true },
   }),
 );
 
@@ -53,9 +64,11 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
   .map((o) => o.trim())
   .filter(Boolean);
 
-// Always include these origins; env var can add more
+// Always include these origins; env var can add more.
+// localhost:4200 is only allowed in non-production to prevent accidental
+// cross-origin access from developer machines in prod.
 const corsOrigins = [
-  "http://localhost:4200",
+  ...(process.env.NODE_ENV !== "production" ? ["http://localhost:4200"] : []),
   "https://converter-hub-eight.vercel.app",
   "https://www.apnaconverter.com",
   "https://apnaconverter.com",

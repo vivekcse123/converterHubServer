@@ -1,11 +1,13 @@
 ﻿"use strict";
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { success, error } = require("../utils/response");
-const { v4: uuidv4 } = require("uuid");
-const { sendWelcomeEmail } = require("../services/email.service");
+const { sendWelcomeEmail, sendPasswordResetEmail } = require("../services/email.service");
 
 const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error("JWT_SECRET environment variable is not set — refusing to start.");
+
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "15m";
 const JWT_REFRESH_SECRET =
   process.env.JWT_REFRESH_SECRET || JWT_SECRET + "_refresh";
@@ -180,6 +182,62 @@ const changePassword = async (req, res, next) => {
   }
 };
 
+// POST /api/auth/forgot-password
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const user = await User.findOne({ email: email?.toLowerCase().trim() });
+
+    // Always return 200 to prevent email enumeration
+    if (!user || !user.isActive) {
+      return success(res, {}, "If that email is registered, a reset link has been sent.");
+    }
+
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    user.passwordResetToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+    user.passwordResetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await user.save({ validateBeforeSave: false });
+
+    try {
+      await sendPasswordResetEmail(user, rawToken);
+    } catch {
+      // Clean up token if email fails — don't leave a dangling token
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      await user.save({ validateBeforeSave: false });
+      return error(res, "Failed to send reset email. Please try again later.", 500);
+    }
+
+    success(res, {}, "If that email is registered, a reset link has been sent.");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/auth/reset-password/:token
+const resetPassword = async (req, res, next) => {
+  try {
+    const hashedToken = crypto.createHash("sha256").update(req.params.token).digest("hex");
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() },
+    });
+
+    if (!user) return error(res, "Reset link is invalid or has expired.", 400);
+
+    user.password = req.body.password;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    user.refreshTokens = []; // Invalidate all active sessions
+    await user.save();
+
+    success(res, {}, "Password reset successful. Please log in with your new password.");
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -189,4 +247,6 @@ module.exports = {
   getMe,
   updateProfile,
   changePassword,
+  forgotPassword,
+  resetPassword,
 };

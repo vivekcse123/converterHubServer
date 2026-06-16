@@ -11,10 +11,12 @@ const {
   getMe,
   updateProfile,
   changePassword,
+  forgotPassword,
+  resetPassword,
 } = require("../controllers/auth.controller");
 const { protect } = require("../middleware/auth.middleware");
 const { validate } = require("../middleware/validate.middleware");
-const { authRateLimiter } = require("../middleware/rateLimit.middleware");
+const { authRateLimiter, passwordResetLimiter, refreshRateLimiter } = require("../middleware/rateLimit.middleware");
 
 router.post(
   "/register",
@@ -41,7 +43,7 @@ router.post(
   login,
 );
 
-router.post("/refresh", refresh);
+router.post("/refresh", refreshRateLimiter, refresh);
 router.post("/logout", protect, logout);
 router.post("/logout-all", protect, logoutAll);
 //wdwnfk
@@ -56,6 +58,22 @@ router.patch(
   ],
   validate,
   changePassword,
+);
+
+router.post(
+  "/forgot-password",
+  passwordResetLimiter,
+  [body("email").isEmail().customSanitizer((v) => v.toLowerCase().trim())],
+  validate,
+  forgotPassword,
+);
+
+router.post(
+  "/reset-password/:token",
+  passwordResetLimiter,
+  [body("password").isLength({ min: 8 })],
+  validate,
+  resetPassword,
 );
 
 module.exports = router;

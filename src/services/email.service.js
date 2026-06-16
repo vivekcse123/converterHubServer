@@ -155,4 +155,78 @@ const escapeHtml = (str) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
-module.exports = { sendWelcomeEmail };
+/**
+ * Send a password-reset email containing a one-time link (expires in 1 hour).
+ */
+const sendPasswordResetEmail = async (user, rawToken) => {
+  const transporter = getTransporter();
+  if (!transporter) {
+    logger.warn(`Password reset email skipped (no SMTP config) for ${user.email}`);
+    return;
+  }
+
+  const resetUrl = `${process.env.APP_URL || 'https://www.apnaconverter.com'}/reset-password/${rawToken}`;
+
+  try {
+    await transporter.sendMail({
+      from: FROM(),
+      to: user.email,
+      subject: 'Reset your ApnaConverter password',
+      html: buildPasswordResetHtml(user.name, resetUrl),
+    });
+    logger.info(`Password reset email sent to ${user.email}`);
+  } catch (err) {
+    logger.warn(`Failed to send password reset email to ${user.email}: ${err.message}`);
+    throw err;
+  }
+};
+
+const buildPasswordResetHtml = (name, resetUrlRaw) => {
+  // Escape both user-controlled values before interpolating into HTML
+  const safeName    = escapeHtml(name);
+  const safeResetUrl = escapeHtml(resetUrlRaw);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Reset your password</title></head>
+<body style="margin:0;padding:0;background:#f4f6f9;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:40px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0"
+             style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.06);">
+        <tr><td style="background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);padding:40px 48px;text-align:center;">
+          <h1 style="margin:0;color:#fff;font-size:28px;font-weight:700;">🔐 ApnaConverter</h1>
+        </td></tr>
+        <tr><td style="padding:48px;">
+          <h2 style="margin:0 0 16px;color:#1e1b4b;font-size:22px;font-weight:600;">Password reset request</h2>
+          <p style="margin:0 0 12px;color:#4b5563;font-size:16px;line-height:1.6;">Hi ${safeName},</p>
+          <p style="margin:0 0 24px;color:#4b5563;font-size:16px;line-height:1.6;">
+            We received a request to reset your password. Click the button below to choose a new one.
+            This link expires in <strong>1 hour</strong>.
+          </p>
+          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 32px;">
+            <tr><td align="center">
+              <a href="${safeResetUrl}"
+                 style="display:inline-block;background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 100%);
+                        color:#fff;text-decoration:none;padding:14px 40px;border-radius:8px;
+                        font-size:16px;font-weight:600;">Reset My Password →</a>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 8px;color:#6b7280;font-size:14px;">If the button doesn't work, copy this link:</p>
+          <p style="margin:0 0 24px;word-break:break-all;">
+            <a href="${safeResetUrl}" style="color:#6366f1;font-size:13px;">${safeResetUrl}</a>
+          </p>
+          <p style="margin:0;color:#9ca3af;font-size:14px;line-height:1.6;">
+            If you didn't request this, you can safely ignore this email — your password won't change.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:24px 48px;text-align:center;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;color:#9ca3af;font-size:13px;">This link expires in 1 hour for your security.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+};
+
+module.exports = { sendWelcomeEmail, sendPasswordResetEmail };
