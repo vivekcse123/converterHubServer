@@ -22,13 +22,21 @@ const signRefreshToken = (id) =>
 const register = async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
-    const existing = await User.findOne({ email });
-    if (existing) return error(res, "Email already registered", 409);
-    const user = await User.create({ name, email, password });
+    // Skip the duplicate-check findOne() — let the unique index reject it.
+    // This saves one full DB round trip on the happy path.
+    let user;
+    try {
+      user = await User.create({ name, email, password });
+    } catch (err) {
+      if (err.code === 11000) return error(res, "Email already registered", 409);
+      throw err;
+    }
     const accessToken = signAccessToken(user._id);
     const refreshToken = signRefreshToken(user._id);
-    user.refreshTokens.push({ token: refreshToken });
-    await user.save({ validateBeforeSave: false });
+    // Atomic push — avoids serialising and saving the full user document
+    await User.findByIdAndUpdate(user._id, {
+      $push: { refreshTokens: { token: refreshToken } },
+    });
     // Fire-and-forget welcome email — never blocks the response
     sendWelcomeEmail(user);
     success(
@@ -62,17 +70,15 @@ const login = async (req, res, next) => {
 
     const accessToken = signAccessToken(user._id);
     const refreshToken = signRefreshToken(user._id);
-    // Keep max 5 refresh tokens per user
-    if (user.refreshTokens.length >= 5) user.refreshTokens.shift();
-    user.refreshTokens.push({ token: refreshToken });
-    // Await only the token save so the refresh token is persisted before responding
-    await user.save({ validateBeforeSave: false });
-
-    // Fire-and-forget metadata update — never blocks the login response
-    user.lastLoginAt = new Date();
-    user.lastLoginIp = req.ip;
-    user.loginCount = (user.loginCount || 0) + 1;
-    user.save({ validateBeforeSave: false }).catch(() => {});
+    // Atomic push with $slice — keeps the last 5 tokens, no full-doc save needed
+    await User.findByIdAndUpdate(user._id, {
+      $push: { refreshTokens: { $each: [{ token: refreshToken }], $slice: -5 } },
+    });
+    // Fire-and-forget metadata — never blocks the login response
+    User.findByIdAndUpdate(user._id, {
+      $set: { lastLoginAt: new Date(), lastLoginIp: req.ip },
+      $inc: { loginCount: 1 },
+    }).catch(() => {});
 
     success(
       res,
@@ -96,22 +102,23 @@ const refresh = async (req, res, next) => {
       return error(res, "Invalid or expired refresh token", 401);
     }
 
-    const user = await User.findById(decoded.id);
-    if (!user || !user.isActive)
-      return error(res, "User not found or deactivated", 401);
-    const tokenExists = user.refreshTokens.some(
-      (t) => t.token === refreshToken,
-    );
-    if (!tokenExists) return error(res, "Refresh token revoked", 401);
+    // Single query: find user AND verify token exists — saves a separate tokenExists check
+    const user = await User.findOne({
+      _id: decoded.id,
+      isActive: true,
+      'refreshTokens.token': refreshToken,
+    });
+    if (!user) return error(res, "Refresh token revoked or account deactivated", 401);
 
     const newAccessToken = signAccessToken(user._id);
     const newRefreshToken = signRefreshToken(user._id);
-    // Rotate refresh token
-    user.refreshTokens = user.refreshTokens.filter(
-      (t) => t.token !== refreshToken,
-    );
-    user.refreshTokens.push({ token: newRefreshToken });
-    await user.save({ validateBeforeSave: false });
+    // Rotate: pull old token, push new — two targeted atomic ops, no full-doc save
+    await User.findByIdAndUpdate(user._id, {
+      $pull: { refreshTokens: { token: refreshToken } },
+    });
+    await User.findByIdAndUpdate(user._id, {
+      $push: { refreshTokens: { $each: [{ token: newRefreshToken }], $slice: -10 } },
+    });
 
     success(res, {
       accessToken: newAccessToken,
