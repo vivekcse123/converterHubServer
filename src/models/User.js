@@ -69,6 +69,17 @@ const userSchema = new mongoose.Schema(
       lastUsageReset: { type: Date, default: Date.now },
     },
 
+    // Template purchases (per-template one-time payments)
+    templatePurchases: [
+      {
+        templateId: { type: String, required: true },
+        orderId:    String,
+        paymentId:  String,
+        amount:     Number,
+        purchasedAt: { type: Date, default: Date.now },
+      },
+    ],
+
     // Auth tokens
     refreshTokens: [
       { token: String, createdAt: { type: Date, default: Date.now } },
