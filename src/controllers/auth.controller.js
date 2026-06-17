@@ -60,15 +60,19 @@ const login = async (req, res, next) => {
     if (!user.isActive)
       return error(res, "Account deactivated. Contact support.", 403);
 
-    user.lastLoginAt = new Date();
-    user.lastLoginIp = req.ip;
-    user.loginCount = (user.loginCount || 0) + 1;
     const accessToken = signAccessToken(user._id);
     const refreshToken = signRefreshToken(user._id);
     // Keep max 5 refresh tokens per user
     if (user.refreshTokens.length >= 5) user.refreshTokens.shift();
     user.refreshTokens.push({ token: refreshToken });
+    // Await only the token save so the refresh token is persisted before responding
     await user.save({ validateBeforeSave: false });
+
+    // Fire-and-forget metadata update — never blocks the login response
+    user.lastLoginAt = new Date();
+    user.lastLoginIp = req.ip;
+    user.loginCount = (user.loginCount || 0) + 1;
+    user.save({ validateBeforeSave: false }).catch(() => {});
 
     success(
       res,
