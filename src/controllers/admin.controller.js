@@ -3,6 +3,7 @@ const User = require("../models/User");
 const ConversionHistory = require("../models/ConversionHistory");
 const Job = require("../models/Job");
 const Plan = require("../models/Plan");
+const Payment = require("../models/Payment");
 const { success, error, paginated } = require("../utils/response");
 const logger = require("../utils/logger");
 const queueService = require("../services/queue.service");
@@ -451,6 +452,170 @@ const updatePlan = async (req, res, next) => {
   }
 };
 
+// ── Subscription Management (Admin) ──────────────────────────────────────────
+
+// POST /api/admin/users/:id/grant-pro
+const grantPro = async (req, res, next) => {
+  try {
+    const { plan = "monthly", expiryDate, notes } = req.body;
+    const validPlans = ["monthly", "yearly", "lifetime"];
+    if (!validPlans.includes(plan)) return error(res, "Invalid plan type", 400);
+
+    let periodEnd;
+    if (plan === "lifetime") {
+      periodEnd = new Date("2099-12-31");
+    } else if (expiryDate) {
+      periodEnd = new Date(expiryDate);
+    } else {
+      const days = plan === "yearly" ? 365 : 30;
+      periodEnd = new Date(Date.now() + days * 86_400_000);
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        "subscription.plan":    plan === "lifetime" ? "yearly" : plan,
+        "subscription.status":  "active",
+        "subscription.currentPeriodStart": new Date(),
+        "subscription.currentPeriodEnd":   periodEnd,
+        "subscription.cancelAtPeriodEnd":  false,
+        "subscription.grantedByAdmin":     true,
+        "subscription.adminNotes":         notes || null,
+        "subscription.adminGrantedAt":     new Date(),
+        "subscription.adminGrantedBy":     req.user._id,
+      },
+      { new: true },
+    );
+    if (!user) return error(res, "User not found", 404);
+    logger.info(`Admin ${req.user.email} granted ${plan} pro to ${user.email}`);
+    success(res, { user: stripSensitive(user) }, "Pro access granted");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/admin/users/:id/remove-pro
+const removePro = async (req, res, next) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        "subscription.plan":   "free",
+        "subscription.status": "cancelled",
+        "subscription.currentPeriodEnd": null,
+        "subscription.grantedByAdmin":   false,
+      },
+      { new: true },
+    );
+    if (!user) return error(res, "User not found", 404);
+    logger.info(`Admin ${req.user.email} removed pro from ${user.email}`);
+    success(res, { user: stripSensitive(user) }, "Pro access removed");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/admin/users/:id/extend-subscription
+const extendSubscription = async (req, res, next) => {
+  try {
+    const { days = 0, months = 0, reason } = req.body;
+    const user = await User.findById(req.params.id);
+    if (!user) return error(res, "User not found", 404);
+
+    const base = user.subscription?.currentPeriodEnd
+      ? new Date(user.subscription.currentPeriodEnd)
+      : new Date();
+
+    const newEnd = new Date(base);
+    newEnd.setDate(newEnd.getDate() + Number(days));
+    newEnd.setMonth(newEnd.getMonth() + Number(months));
+
+    user.subscription.currentPeriodEnd = newEnd;
+    user.subscription.status = "active";
+    await user.save();
+
+    logger.info(`Admin ${req.user.email} extended subscription for ${user.email} to ${newEnd.toISOString()}`);
+    success(res, { user: stripSensitive(user.toObject()), newExpiry: newEnd }, "Subscription extended");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/analytics/subscription-stats
+const getDetailedSubscriptionStats = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const in7Days = new Date(Date.now() + 7 * 86_400_000);
+
+    const [
+      totalFree, totalMonthly, totalYearly, totalActive, totalExpired,
+      totalCancelled, expiringSoon, adminGranted, totalSuspended, totalBanned,
+    ] = await Promise.all([
+      User.countDocuments({ "subscription.plan": "free" }),
+      User.countDocuments({ "subscription.plan": "monthly", "subscription.status": "active" }),
+      User.countDocuments({ "subscription.plan": "yearly",  "subscription.status": "active" }),
+      User.countDocuments({ "subscription.status": "active" }),
+      User.countDocuments({ "subscription.status": { $in: ["expired","past_due"] } }),
+      User.countDocuments({ "subscription.status": "cancelled" }),
+      User.countDocuments({ "subscription.status": "active", "subscription.currentPeriodEnd": { $lte: in7Days, $gte: now } }),
+      User.countDocuments({ "subscription.grantedByAdmin": true }),
+      User.countDocuments({ isSuspended: true }),
+      User.countDocuments({ isBanned: true }),
+    ]);
+
+    success(res, {
+      totalFree, totalMonthly, totalYearly, totalActive,
+      totalExpired, totalCancelled, expiringSoon, adminGranted,
+      totalSuspended, totalBanned,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/analytics/revenue
+const getRevenue = async (req, res, next) => {
+  try {
+    const now = new Date();
+    const todayStart  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const monthStart  = new Date(now.getFullYear(), now.getMonth(), 1);
+    const yearStart   = new Date(now.getFullYear(), 0, 1);
+
+    const [todayRev, monthRev, yearRev, totalRev, monthlyCount, yearlyCount] = await Promise.all([
+      Payment.aggregate([{ $match: { status: "captured", createdAt: { $gte: todayStart } } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+      Payment.aggregate([{ $match: { status: "captured", createdAt: { $gte: monthStart } } }, { $group: { _id: null, total: { $sum: "$amount" } } }]),
+      Payment.aggregate([{ $match: { status: "captured", createdAt: { $gte: yearStart } } },  { $group: { _id: null, total: { $sum: "$amount" } } }]),
+      Payment.aggregate([{ $match: { status: "captured" } }, { $group: { _id: null, total: { $sum: "$amount" }, count: { $sum: 1 } } }]),
+      Payment.countDocuments({ plan: "monthly", status: "captured" }),
+      Payment.countDocuments({ plan: "yearly",  status: "captured" }),
+    ]);
+
+    const toRupees = (agg) => ((agg[0]?.total ?? 0) / 100).toFixed(2);
+
+    success(res, {
+      today:          toRupees(todayRev),
+      thisMonth:      toRupees(monthRev),
+      thisYear:       toRupees(yearRev),
+      total:          toRupees(totalRev),
+      totalPayments:  totalRev[0]?.count ?? 0,
+      monthlyPayments: monthlyCount,
+      yearlyPayments:  yearlyCount,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/users/:id/payments
+const getUserPayments = async (req, res, next) => {
+  try {
+    const payments = await Payment.find({ userId: req.params.id }).sort({ createdAt: -1 }).lean();
+    success(res, { payments });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ── Trending Converters (public-facing, called from frontend) ─────────────────
 
 // GET /api/converters/trending?limit=10&days=7
@@ -498,6 +663,12 @@ module.exports = {
   banUser,
   unbanUser,
   resetUserUsage,
+  grantPro,
+  removePro,
+  extendSubscription,
+  getDetailedSubscriptionStats,
+  getRevenue,
+  getUserPayments,
   getAnalyticsOverview,
   getToolStats,
   getDailyStats,

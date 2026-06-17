@@ -20,7 +20,9 @@ const adminRoutes = require("./routes/admin.routes");
 // const aiRoutes     = require("./routes/ai.routes");
 const jobsRoutes     = require("./routes/jobs.routes");
 const trendingRoutes = require("./routes/trending.routes");
-const paymentRoutes  = require("./routes/payment.routes");
+const paymentRoutes      = require("./routes/payment.routes");
+const subscriptionRoutes = require("./routes/subscription.routes");
+const webhookRoutes      = require("./routes/webhook.routes");
 const logger = require("./utils/logger");
 
 const app = express();
@@ -147,7 +149,9 @@ app.use("/api/admin", adminRoutes);
 // app.use("/api/ai",       aiRoutes);  // disabled — no OpenAI key
 app.use("/api/jobs",      jobsRoutes);
 app.use("/api/converters", trendingRoutes);
-app.use("/api/payments",  paymentRoutes);
+app.use("/api/payments",      paymentRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/webhooks",      webhookRoutes);
 
 // ── Error Handlers ────────────────────────────────────────────────────────────
 app.use(notFoundHandler);

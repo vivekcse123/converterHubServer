@@ -41,22 +41,25 @@ const userSchema = new mongoose.Schema(
     banReason: String,
     suspendedUntil: Date,
 
-    // Subscription
+    // Subscription (Razorpay)
     subscription: {
       plan: {
         type: String,
-        enum: ["free", "pro", "team", "enterprise"],
+        enum: ["free", "monthly", "yearly"],
         default: "free",
       },
       status: {
         type: String,
-        enum: ["active", "cancelled", "expired", "trialing"],
-        default: "active",
+        enum: ["free", "active", "past_due", "cancelled", "expired"],
+        default: "free",
       },
-      stripeCustomerId: String,
-      stripeSubscriptionId: String,
-      currentPeriodEnd: Date,
-      cancelAtPeriodEnd: { type: Boolean, default: false },
+      razorpaySubscriptionId: String,
+      currentPeriodStart: Date,
+      currentPeriodEnd:   Date,
+      cancelAtPeriodEnd:  { type: Boolean, default: false },
+      cancelledAt:        Date,
+      resumeCount:        { type: Number, default: 0 },
+      totalDownloads:     { type: Number, default: 0 },
     },
 
     // Usage tracking (reset daily via cron)

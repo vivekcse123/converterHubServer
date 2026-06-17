@@ -32,13 +32,19 @@ router.post("/users/:id/unsuspend", admin.unsuspendUser);
 router.post("/users/:id/ban", admin.banUser);
 router.post("/users/:id/unban", admin.unbanUser);
 router.post("/users/:id/reset-usage", admin.resetUserUsage);
+router.post("/users/:id/grant-pro",   admin.grantPro);
+router.post("/users/:id/remove-pro",  admin.removePro);
+router.post("/users/:id/extend-subscription", admin.extendSubscription);
+router.get("/users/:id/payments",     admin.getUserPayments);
 
 // ── Analytics ────────────────────────────────────────────────────────────────
 router.get("/analytics/overview", admin.getAnalyticsOverview);
 router.get("/analytics/tools", admin.getToolStats);
 router.get("/analytics/daily", admin.getDailyStats);
-router.get("/analytics/subscriptions", admin.getSubscriptionStats);
-router.get("/analytics/trending", admin.getTrendingConverters);
+router.get("/analytics/subscriptions",        admin.getSubscriptionStats);
+router.get("/analytics/subscription-stats",   admin.getDetailedSubscriptionStats);
+router.get("/analytics/revenue",              admin.getRevenue);
+router.get("/analytics/trending",             admin.getTrendingConverters);
 
 // ── Queue & Jobs ─────────────────────────────────────────────────────────────
 router.get("/queue/stats", admin.getQueueStats);
