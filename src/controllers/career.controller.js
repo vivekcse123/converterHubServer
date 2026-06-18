@@ -96,13 +96,17 @@ const upsertPortfolio = async (req, res, next) => {
   try {
     const { username } = req.body;
     if (username) {
-      // Check username not taken by another user
       const existing = await Portfolio.findOne({ username, userId: { $ne: req.user._id } });
       if (existing) return error(res, "Username already taken", 409);
     }
+    // Normalize skill levels to lowercase to match enum
+    const body = { ...req.body, userId: req.user._id };
+    if (Array.isArray(body.skills)) {
+      body.skills = body.skills.map(s => ({ ...s, level: (s.level || 'intermediate').toLowerCase() }));
+    }
     const portfolio = await Portfolio.findOneAndUpdate(
       { userId: req.user._id },
-      { ...req.body, userId: req.user._id },
+      body,
       { new: true, upsert: true, runValidators: true }
     );
     success(res, { portfolio });

@@ -19,6 +19,20 @@ const createSubscription = async (req, res, next) => {
       return error(res, "Invalid plan. Choose monthly or yearly.", 400);
     }
 
+    const existing = req.user.subscription ?? {};
+    const isYearlyActive  = existing.status === "active" && existing.plan === "yearly";
+    const isMonthlyActive = existing.status === "active" && existing.plan === "monthly";
+
+    // Hierarchy enforcement
+    if (isYearlyActive) {
+      return error(res, "You already have an active Yearly plan. It is the highest tier available.", 400);
+    }
+    if (isMonthlyActive && plan === "monthly") {
+      return error(res, "You already have an active Monthly plan.", 400);
+    }
+
+    const isUpgrade = isMonthlyActive && plan === "yearly";
+
     const planId = plan === "monthly"
       ? process.env.RAZORPAY_PLAN_MONTHLY
       : process.env.RAZORPAY_PLAN_YEARLY;
@@ -29,13 +43,16 @@ const createSubscription = async (req, res, next) => {
 
     const rzp = getRazorpay();
 
-    // If user already has an active subscription, cancel it first
-    const existingSub = req.user.subscription?.razorpaySubscriptionId;
-    if (existingSub && req.user.subscription?.status === "active") {
+    // Cancel existing subscription when upgrading monthly → yearly or replacing
+    const existingRzpId = existing.razorpaySubscriptionId;
+    if (existingRzpId && existing.status === "active") {
       try {
-        await rzp.subscriptions.cancel(existingSub, { cancel_at_cycle_end: false });
+        await rzp.subscriptions.cancel(existingRzpId, { cancel_at_cycle_end: false });
+        if (isUpgrade) {
+          logger.info(`Cancelled monthly sub ${existingRzpId} for yearly upgrade (user ${req.user._id})`);
+        }
       } catch (e) {
-        logger.warn(`Could not cancel existing subscription ${existingSub}: ${e.message}`);
+        logger.warn(`Could not cancel existing subscription ${existingRzpId}: ${e.message}`);
       }
     }
 
@@ -145,15 +162,28 @@ const cancelSubscription = async (req, res, next) => {
 // GET /api/subscriptions/status
 const getStatus = (req, res) => {
   const sub = req.user.subscription ?? {};
-  const isPro = sub.status === "active" && ["monthly", "yearly"].includes(sub.plan);
+  const isPro          = sub.status === "active" && ["monthly", "yearly"].includes(sub.plan);
+  const isYearlyActive = sub.status === "active" && sub.plan === "yearly";
+  const isMonthlyActive= sub.status === "active" && sub.plan === "monthly";
+
+  let daysRemaining = 0;
+  if (sub.currentPeriodEnd) {
+    daysRemaining = Math.max(0, Math.ceil((new Date(sub.currentPeriodEnd) - Date.now()) / 86_400_000));
+  }
+
   success(res, {
     isPro,
+    isPremium:          isPro,
     plan:               sub.plan ?? "free",
     status:             sub.status ?? "free",
+    startedAt:          sub.currentPeriodStart ?? null,
     currentPeriodEnd:   sub.currentPeriodEnd ?? null,
     cancelAtPeriodEnd:  sub.cancelAtPeriodEnd ?? false,
+    daysRemaining,
     resumeCount:        sub.resumeCount ?? 0,
     totalDownloads:     sub.totalDownloads ?? 0,
+    canPurchaseMonthly: !isYearlyActive && !isMonthlyActive,
+    canPurchaseYearly:  !isYearlyActive,
   });
 };
 
