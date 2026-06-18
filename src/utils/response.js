@@ -8,13 +8,15 @@ const success = (res, data = {}, message = "Success", statusCode = 200) =>
 
 /**
  * Send a paginated JSON response.
+ * The 6th argument is an optional meta object (e.g. { statusCounts }).
  */
-const paginated = (res, data, total, page, limit, message = "Success") =>
+const paginated = (res, data, total, page, limit, meta = {}) =>
   res.status(200).json({
     success: true,
-    message,
+    message: "Success",
     data,
     pagination: { total, page, limit, pages: Math.ceil(total / limit) },
+    meta,
   });
 
 /**
