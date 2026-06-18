@@ -5,7 +5,7 @@ const { getRazorpay } = require("../config/razorpay");
 const { success, error } = require("../utils/response");
 const logger = require("../utils/logger");
 
-const PREMIUM_TEMPLATE_IDS = ["ats-professional", "modern-professional"];
+const PREMIUM_TEMPLATE_IDS = ["ats-professional", "modern-professional", "tech"];
 const TEMPLATE_PRICE_PAISE = 2900; // ₹29 in paise
 
 // POST /api/payments/create-order

@@ -62,4 +62,7 @@ router.get("/logs/errors", admin.getErrorLogs);
 router.get("/plans", admin.getPlans);
 router.put("/plans/:id", admin.updatePlan);
 
+// ── Resume Download Audit Logs ────────────────────────────────────────────────
+router.get("/resume-logs", require("../controllers/resume.controller").getDownloadLogs);
+
 module.exports = router;

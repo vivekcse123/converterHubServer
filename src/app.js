@@ -23,6 +23,10 @@ const trendingRoutes = require("./routes/trending.routes");
 const paymentRoutes      = require("./routes/payment.routes");
 const subscriptionRoutes = require("./routes/subscription.routes");
 const webhookRoutes      = require("./routes/webhook.routes");
+const careerRoutes       = require("./routes/career.routes");
+const shareRoutes        = require("./routes/share.routes");
+const publicRoutes       = require("./routes/public.routes");
+const resumeRoutes       = require("./routes/resume.routes");
 const logger = require("./utils/logger");
 
 const app = express();
@@ -152,6 +156,10 @@ app.use("/api/converters", trendingRoutes);
 app.use("/api/payments",      paymentRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/webhooks",      webhookRoutes);
+app.use("/api/career",        careerRoutes);
+app.use("/api/share",         shareRoutes);
+app.use("/api/public",        publicRoutes);
+app.use("/api/resume",        resumeRoutes);
 
 // ── Error Handlers ────────────────────────────────────────────────────────────
 app.use(notFoundHandler);
