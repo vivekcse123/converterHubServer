@@ -237,7 +237,7 @@ const createLifetimeOrder = async (req, res, next) => {
     const order = await rzp.orders.create({
       amount:   PLANS.lifetime.paise,
       currency: "INR",
-      receipt:  `lifetime_${req.user._id}_${Date.now()}`,
+      receipt:  `ltm_${Date.now()}`,   // max 40 chars — keep short
       notes:    { userId: req.user._id.toString(), plan: "lifetime" },
     });
 
