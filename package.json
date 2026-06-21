@@ -8,7 +8,7 @@
     "dev": "nodemon server.js --ignore uploads/ --ignore outputs/",
     "worker": "node src/workers/conversion.worker.js",
     "test": "jest --coverage --forceExit",
-    "render-build": "apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev && npm install"
+    "render-build": "apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libatk1.0-dev libatk-bridge2.0-dev libxcomposite-dev libxdamage-dev libxrandr-dev libgbm-dev libpango-1.0-0 libcairo2 libasound2 && npm install"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.490.0",
@@ -51,6 +51,7 @@
     "pdfkit": "^0.15.0",
     "pdfmake": "^0.3.11",
     "pptxgenjs": "^3.12.0",
+    "puppeteer": "^24.43.1",
     "razorpay": "^2.9.6",
     "resend": "^6.12.0",
     "sharp": "^0.32.6",

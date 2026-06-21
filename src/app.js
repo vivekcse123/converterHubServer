@@ -105,7 +105,9 @@ app.use(compression());
 // Resume JSON bodies can be large (embedded base64 images); other API routes
 // do not need more than 1 MB. Keep the global limit low and override per-route.
 app.use((req, _res, next) => {
-  const limit = req.path.startsWith("/api/resume") ? "2mb" : "1mb";
+  let limit = "1mb";
+  if (req.path === "/api/resume/render-html") limit = "5mb";
+  else if (req.path.startsWith("/api/resume")) limit = "2mb";
   express.json({ limit })(req, _res, next);
 });
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));

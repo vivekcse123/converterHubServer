@@ -2,11 +2,11 @@
 const express    = require("express");
 const rateLimit  = require("express-rate-limit");
 const { protect: authenticate } = require("../middleware/auth.middleware");
-const { generatePdf }  = require("../controllers/resume.controller");
+const { generatePdf, renderHtml } = require("../controllers/resume.controller");
 
 const router = express.Router();
 
-// 10 PDFs per 10 minutes per user (generous for free, enforced server-side)
+// 10 PDFs per 10 minutes per user
 const pdfRateLimit = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 10,
@@ -16,7 +16,10 @@ const pdfRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
-// POST /api/resume/pdf — server-side PDF generation with access control + watermark
+// POST /api/resume/pdf — legacy pdfmake-based generation
 router.post("/pdf", authenticate, pdfRateLimit, generatePdf);
+
+// POST /api/resume/render-html — Puppeteer pixel-perfect PDF from live DOM
+router.post("/render-html", authenticate, pdfRateLimit, renderHtml);
 
 module.exports = router;
