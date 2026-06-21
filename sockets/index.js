@@ -5,14 +5,34 @@ const logger = require("../src/utils/logger");
 
 let io = null;
 
+// Mirror the same allowed-origins list used by the REST CORS config
+const buildCorsOrigins = () => {
+  const extra = (process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  return [
+    ...(process.env.NODE_ENV !== "production" ? ["http://localhost:4200"] : []),
+    "https://converter-hub-eight.vercel.app",
+    "https://www.apnaconverter.com",
+    "https://apnaconverter.com",
+    ...extra,
+  ];
+};
+
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.CORS_ORIGIN || "http://localhost:4200",
+      origin: buildCorsOrigins(),
       methods: ["GET", "POST"],
       credentials: true,
     },
     transports: ["websocket", "polling"],
+    // Disconnect clients that have not authenticated within 30s
+    connectTimeout: 30_000,
+    // Ping every 25s, disconnect after 5s of no pong
+    pingInterval: 25_000,
+    pingTimeout: 5_000,
   });
 
   // JWT authentication middleware for WebSocket connections
@@ -38,7 +58,9 @@ const initSocket = (httpServer) => {
     );
 
     socket.on("subscribe:job", (jobId) => {
-      socket.join(`job:${jobId}`);
+      if (typeof jobId === "string" && jobId.length <= 64) {
+        socket.join(`job:${jobId}`);
+      }
     });
 
     socket.on("unsubscribe:job", (jobId) => {
@@ -47,6 +69,10 @@ const initSocket = (httpServer) => {
 
     socket.on("disconnect", () => {
       logger.debug(`WebSocket disconnected: ${socket.id}`);
+    });
+
+    socket.on("error", (err) => {
+      logger.warn(`WebSocket error on ${socket.id}: ${err.message}`);
     });
   });
 

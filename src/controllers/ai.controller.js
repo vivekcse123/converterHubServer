@@ -178,10 +178,38 @@ const extractFormData = async (req, res, next) => {
   }
 };
 
+// POST /api/ai/resume/bullets  — generate ATS-optimised bullet points for a job role
+const resumeBullets = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { jobTitle, company, description, count } = req.body;
+    if (!jobTitle) return error(res, "jobTitle is required", 400);
+    const result = await aiService.generateResumeBullets({ jobTitle, company, description, count: Number(count) || 4 });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Bullets generated");
+  } catch (err) { next(err); }
+};
+
+// POST /api/ai/resume/cover-letter  — generate a full cover letter
+const coverLetter = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { name, jobTitle, company, skills, experience, jobDescription } = req.body;
+    if (!jobTitle) return error(res, "jobTitle is required", 400);
+    const result = await aiService.generateCoverLetter({ name, jobTitle, company, skills, experience, jobDescription });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Cover letter generated");
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   summarizePdf,
   chatWithPdf,
   uploadChatPdf,
   extractKeywords,
   extractFormData,
+  resumeBullets,
+  coverLetter,
 };

@@ -37,7 +37,13 @@ const TEMPLATE_STYLES = {
   "minimal":            { headerBg: "#ffffff", headerText: "#111827", accentColor: "#374151", border: true  },
 };
 
-const PREMIUM_TEMPLATE_IDS = ["ats-professional", "modern-professional", "tech"];
+const PREMIUM_TEMPLATE_IDS = [
+  "ats-professional", "modern-professional", "tech",
+  "sidebar-pro", "banner-dark", "timeline-pro", "corporate-pro",
+  "executive-elite", "luxury-gold", "creative-portfolio-pro",
+  "startup-founder", "product-manager-pro",
+  "photo-government", "photo-executive",
+];
 
 function formatDate(str) {
   if (!str) return "";

@@ -26,7 +26,11 @@ function getUserPlanType(user) {
 
 function isPro(user) {
   const planType = getUserPlanType(user);
-  return ["monthly", "yearly", "admin"].includes(planType);
+  return ["monthly", "yearly", "lifetime", "admin"].includes(planType);
+}
+
+function hasPurchasedTemplate(user, templateId) {
+  return (user?.templatePurchases ?? []).some(p => p.templateId === templateId);
 }
 
 /**
@@ -47,8 +51,9 @@ const generatePdf = async (req, res) => {
   const ip              = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "";
   const userAgent       = req.headers["user-agent"] || "";
 
-  // ── Block non-Pro users from premium templates ──────────────────────────────
-  if (isPremiumTmpl && !userIsPro) {
+  // ── Block non-Pro users from premium templates (unless they purchased individually) ────
+  const templatePurchased = hasPurchasedTemplate(req.user, templateId);
+  if (isPremiumTmpl && !userIsPro && !templatePurchased) {
     await ResumeDownloadLog.create({
       userId:            req.user._id,
       templateId,

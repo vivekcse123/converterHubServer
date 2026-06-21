@@ -230,4 +230,54 @@ const buildPasswordResetHtml = (name, resetUrlRaw) => {
 </body></html>`;
 };
 
-module.exports = { sendWelcomeEmail, sendPasswordResetEmail };
+/**
+ * Send a subscription expiry reminder email.
+ * Called by the nightly cron job for users expiring in 7 days or 1 day.
+ */
+const sendExpiryReminderEmail = async (user, daysLeft) => {
+  const transporter = getTransporter();
+  if (!transporter) return;
+  const urgency = daysLeft === 1 ? "expires TOMORROW" : `expires in ${daysLeft} days`;
+  const subject  = daysLeft === 1
+    ? "⚠️ Your ApnaConverter Pro plan expires tomorrow"
+    : `Your ApnaConverter Pro plan expires in ${daysLeft} days`;
+  try {
+    await transporter.sendMail({
+      from: FROM(),
+      to: user.email,
+      subject,
+      html: `
+      <div style="font-family:system-ui,sans-serif;max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;">
+        <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);padding:32px 24px;text-align:center;">
+          <h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;">Your Pro Plan ${urgency}</h1>
+        </div>
+        <div style="padding:28px 24px;">
+          <p style="color:#475569;margin:0 0 16px;">Hi ${user.name?.split(" ")[0] || "there"},</p>
+          <p style="color:#475569;margin:0 0 20px;">Your <strong>ApnaConverter Pro</strong> subscription ${urgency}. Renew now to keep:</p>
+          <ul style="color:#475569;margin:0 0 24px;padding-left:20px;line-height:1.8;">
+            <li>14 premium resume templates</li>
+            <li>Cover Letter Builder</li>
+            <li>Portfolio with public URL</li>
+            <li>Job Application Tracker</li>
+            <li>AI Writing Assistant</li>
+            <li>No watermark on PDF downloads</li>
+          </ul>
+          <div style="text-align:center;margin:24px 0;">
+            <a href="${process.env.APP_URL || "https://www.apnaconverter.com"}/resume-builder/pricing"
+               style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:15px;">
+              Renew My Pro Plan →
+            </a>
+          </div>
+          <p style="color:#94a3b8;font-size:12px;margin:0;text-align:center;">
+            If you choose not to renew, your account will revert to the free plan and your Pro features will be paused.
+          </p>
+        </div>
+      </div>`,
+    });
+    logger.info(`Expiry reminder sent to ${user.email} (${daysLeft}d left)`);
+  } catch (err) {
+    logger.error(`Failed to send expiry reminder to ${user.email}:`, err.message);
+  }
+};
+
+module.exports = { sendWelcomeEmail, sendPasswordResetEmail, sendExpiryReminderEmail };

@@ -200,6 +200,13 @@ const processor = async (bullJob) => {
       progress: 0,
     });
     emitJobFailed(jobDbId, err.message, userId);
+
+    // Clean up input files so they don't linger until the hourly cron
+    const { deleteFile } = require("../utils/fileCleanup");
+    for (const inputPath of inputPaths || []) {
+      await deleteFile(inputPath);
+    }
+
     throw err;
   }
 };

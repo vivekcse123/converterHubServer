@@ -18,9 +18,9 @@ async function main() {
     interval: 1,
     item: {
       name:        "ApnaConverter Pro Monthly",
-      amount:      900,   // ₹9 in paise
+      amount:      9900,   // ₹99 in paise
       currency:    "INR",
-      description: "Pro Monthly — unlimited templates, no watermark, ATS checker",
+      description: "Pro Monthly — all templates, no watermark, cover letter, portfolio, job tracker, AI assistant",
     },
     notes: { plan: "monthly" },
   });
@@ -30,9 +30,9 @@ async function main() {
     interval: 1,
     item: {
       name:        "ApnaConverter Pro Yearly",
-      amount:      9900,  // ₹99 in paise
+      amount:      69900,  // ₹699 in paise
       currency:    "INR",
-      description: "Pro Yearly — everything in monthly + exclusive designs",
+      description: "Pro Yearly — everything in monthly + 5 months free + early template access",
     },
     notes: { plan: "yearly" },
   });

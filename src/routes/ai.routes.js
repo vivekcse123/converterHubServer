@@ -17,10 +17,12 @@ const aiRateLimiter = rateLimit({
 router.use(optionalAuth);
 router.use(aiRateLimiter);
 
-router.post("/summarize", ai.summarizePdf);
-router.post("/chat/upload", ai.uploadChatPdf);
-router.post("/chat", ai.chatWithPdf);
-router.post("/extract-keywords", ai.extractKeywords);
-router.post("/form-fill", ai.extractFormData);
+router.post("/summarize",           ai.summarizePdf);
+router.post("/chat/upload",         ai.uploadChatPdf);
+router.post("/chat",                ai.chatWithPdf);
+router.post("/extract-keywords",    ai.extractKeywords);
+router.post("/form-fill",           ai.extractFormData);
+router.post("/resume/bullets",      ai.resumeBullets);
+router.post("/resume/cover-letter", ai.coverLetter);
 
 module.exports = router;

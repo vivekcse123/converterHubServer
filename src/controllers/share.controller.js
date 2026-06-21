@@ -48,6 +48,16 @@ exports.getShareStatus = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// GET /api/share/views  — view counts for all published resumes owned by user
+exports.getMyViews = async (req, res, next) => {
+  try {
+    const docs = await SharedResume.find({ userId: req.user._id }).select("resumeId views slug isActive").lean();
+    const map  = {};
+    for (const d of docs) map[d.resumeId] = { views: d.views, slug: d.slug, published: d.isActive };
+    return res.json({ success: true, data: map });
+  } catch (err) { next(err); }
+};
+
 // GET /api/public/r/:slug  — public resume view (no auth)
 exports.getPublicResume = async (req, res, next) => {
   try {

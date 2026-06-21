@@ -6,7 +6,7 @@ const paymentSchema = new mongoose.Schema(
     userId:   { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     amount:   { type: Number, required: true },           // paise
     currency: { type: String, default: "INR" },
-    plan:     { type: String, enum: ["monthly", "yearly"], required: true },
+    plan:     { type: String, enum: ["monthly", "yearly", "lifetime"], required: true },
     status:   { type: String, enum: ["captured", "failed", "refunded"], default: "captured" },
     razorpayPaymentId:      String,
     razorpayOrderId:        String,

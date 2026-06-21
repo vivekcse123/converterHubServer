@@ -104,7 +104,16 @@ const updateUser = async (req, res, next) => {
     const update = {};
     if (name !== undefined) update.name = name;
     if (email !== undefined) update.email = email;
-    if (role !== undefined) update.role = role;
+    // Superadmin role can only be assigned by superadmins, not regular admins
+    if (role !== undefined) {
+      const allowedRoles = req.user.role === "superadmin"
+        ? ["user", "premium", "admin", "superadmin"]
+        : ["user", "premium", "admin"];
+      if (!allowedRoles.includes(role)) {
+        return error(res, `You cannot assign the role '${role}'.`, 403);
+      }
+      update.role = role;
+    }
     if (plan !== undefined) update["subscription.plan"] = plan;
     if (isActive !== undefined) update.isActive = isActive;
     if (adminNotes !== undefined) update.adminNotes = adminNotes;
@@ -442,9 +451,19 @@ const getPlans = async (req, res, next) => {
 // PUT /api/admin/plans/:id
 const updatePlan = async (req, res, next) => {
   try {
-    const plan = await Plan.findOneAndUpdate({ id: req.params.id }, req.body, {
+    const { name, price, features, isActive, sortOrder, description } = req.body;
+    const allowedUpdate = {};
+    if (name        !== undefined) allowedUpdate.name        = name;
+    if (price       !== undefined) allowedUpdate.price       = price;
+    if (features    !== undefined) allowedUpdate.features    = features;
+    if (isActive    !== undefined) allowedUpdate.isActive    = isActive;
+    if (sortOrder   !== undefined) allowedUpdate.sortOrder   = sortOrder;
+    if (description !== undefined) allowedUpdate.description = description;
+
+    const plan = await Plan.findOneAndUpdate({ id: req.params.id }, allowedUpdate, {
       new: true,
       upsert: true,
+      runValidators: true,
     });
     success(res, { plan }, "Plan updated");
   } catch (err) {
@@ -463,7 +482,7 @@ const grantPro = async (req, res, next) => {
 
     let periodEnd;
     if (plan === "lifetime") {
-      periodEnd = new Date("2099-12-31");
+      periodEnd = null; // Lifetime never expires
     } else if (expiryDate) {
       periodEnd = new Date(expiryDate);
     } else {
@@ -474,8 +493,8 @@ const grantPro = async (req, res, next) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       {
-        "subscription.plan":    plan === "lifetime" ? "yearly" : plan,
-        "subscription.status":  "active",
+        "subscription.plan":               plan,
+        "subscription.status":             "active",
         "subscription.currentPeriodStart": new Date(),
         "subscription.currentPeriodEnd":   periodEnd,
         "subscription.cancelAtPeriodEnd":  false,
