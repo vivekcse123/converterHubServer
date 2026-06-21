@@ -48,6 +48,29 @@ function formatDate(str) {
   return str;
 }
 
+// Returns relative luminance (0=black, 1=white) to pick readable text color
+function getLuminance(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+// Merges user's custom design color into the base template style
+function resolveStyle(baseStyle, resume) {
+  const userColor = resume?.design?.accentColor;
+  if (!userColor || !/^#[0-9a-fA-F]{6}$/.test(userColor)) return baseStyle;
+  const isMinimal = baseStyle.headerBg === "#ffffff";
+  return {
+    ...baseStyle,
+    accentColor: userColor,
+    // For minimal templates keep white header bg; for colored templates use user color
+    headerBg:   isMinimal ? baseStyle.headerBg : userColor,
+    headerText: isMinimal ? baseStyle.headerText
+                          : (getLuminance(userColor) > 0.4 ? "#111827" : "#ffffff"),
+  };
+}
+
 function sectionHeader(title, style) {
   const accent = style.accentColor;
   return [
@@ -58,7 +81,7 @@ function sectionHeader(title, style) {
 }
 
 function buildDocDef(resume, isPro, templateId) {
-  const style  = TEMPLATE_STYLES[templateId] || TEMPLATE_STYLES["minimal"];
+  const style  = resolveStyle(TEMPLATE_STYLES[templateId] || TEMPLATE_STYLES["minimal"], resume);
   const p      = resume.personal || {};
   const content = [];
 
@@ -77,7 +100,7 @@ function buildDocDef(resume, isPro, templateId) {
       p.jobTitle ? { text: p.jobTitle, style: "jobTitleMinimal" } : null,
       contactParts.length ? { text: contactParts.join("  •  "), style: "contactMinimal" } : null,
       socialParts.length  ? { text: socialParts.join("  •  "),  style: "contactMinimal" } : null,
-      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1, lineColor: "#111827" }] },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1, lineColor: style.accentColor }] },
       { text: "", margin: [0, 6, 0, 0] },
     );
   } else {
