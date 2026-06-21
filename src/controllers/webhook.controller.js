@@ -5,27 +5,35 @@ const Payment = require("../models/Payment");
 const logger  = require("../utils/logger");
 
 const PLANS = {
-  monthly: 900,
-  yearly:  9900,
+  monthly:  9900,
+  yearly:  69900,
 };
 
 // POST /api/webhooks/razorpay  (raw body required — configured in app.js)
 const razorpayWebhook = async (req, res) => {
   try {
-    // Verify webhook signature
+    // Verify webhook signature — always required; reject if secret not configured
     const secret    = process.env.RAZORPAY_WEBHOOK_SECRET;
     const signature = req.headers["x-razorpay-signature"];
 
-    if (secret && signature) {
-      const expected = crypto
-        .createHmac("sha256", secret)
-        .update(JSON.stringify(req.body))
-        .digest("hex");
+    if (!secret) {
+      logger.error("RAZORPAY_WEBHOOK_SECRET is not set — rejecting all webhook calls");
+      return res.status(500).json({ ok: false });
+    }
 
-      if (expected !== signature) {
-        logger.warn("Razorpay webhook signature mismatch");
-        return res.status(400).json({ ok: false });
-      }
+    if (!signature) {
+      logger.warn("Razorpay webhook received with no signature header");
+      return res.status(400).json({ ok: false });
+    }
+
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(JSON.stringify(req.body))
+      .digest("hex");
+
+    if (expected !== signature) {
+      logger.warn("Razorpay webhook signature mismatch — possible spoofed request");
+      return res.status(400).json({ ok: false });
     }
 
     const event   = req.body.event;

@@ -8,9 +8,10 @@ const { sendWelcomeEmail, sendPasswordResetEmail } = require("../services/email.
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) throw new Error("JWT_SECRET environment variable is not set — refusing to start.");
 
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "15m";
-const JWT_REFRESH_SECRET =
-  process.env.JWT_REFRESH_SECRET || JWT_SECRET + "_refresh";
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+if (!JWT_REFRESH_SECRET) throw new Error("JWT_REFRESH_SECRET environment variable is not set — refusing to start.");
+
+const JWT_EXPIRES_IN     = process.env.JWT_EXPIRES_IN     || "15m";
 const JWT_REFRESH_EXPIRES = process.env.JWT_REFRESH_EXPIRES || "30d";
 
 const signAccessToken = (id) =>

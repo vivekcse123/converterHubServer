@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 const path = require("path");
 const fse = require("fs-extra");
 const { v4: uuidv4 } = require("uuid");
@@ -48,7 +48,6 @@ const logConversion = async (
       processingTimeMs: Date.now() - startMs,
       ipAddress: req.ip,
     });
-    // Increment usage counter
     if (req.user?._id) {
       await User.findByIdAndUpdate(req.user._id, {
         $inc: { "usage.conversionsToday": 1, "usage.totalConversions": 1 },
@@ -67,13 +66,41 @@ const buildDownloadUrl = (req, fileName) => {
 
 const cleanup = (filePath) => deleteFile(filePath);
 
+/**
+ * Verify the output file exists and has content.
+ * Throws a descriptive error if missing or empty.
+ */
+const verifyOutput = async (outputPath) => {
+  if (!outputPath) return;
+  let stat;
+  try {
+    stat = await fse.stat(outputPath);
+  } catch {
+    throw Object.assign(
+      new Error("Conversion produced no output file. The input may be unsupported or corrupted."),
+      { statusCode: 500 },
+    );
+  }
+  if (stat.size === 0) {
+    await fse.remove(outputPath).catch(() => {});
+    throw Object.assign(
+      new Error("Conversion produced an empty output file. Please verify your input and try again."),
+      { statusCode: 500 },
+    );
+  }
+};
+
 const withSingle = (fn, tool) => async (req, res, next) => {
   const startMs = Date.now();
   try {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No file uploaded", 400);
     const result = await fn(req.file.path, req.body);
-    const stat = await fse.stat(result.outputPath).catch(() => ({ size: 0 }));
+
+    // Verify output exists and is non-empty before returning URL
+    await verifyOutput(result.outputPath);
+
+    const stat = await fse.stat(result.outputPath).catch(() => ({ size: result.size || 0 }));
     const out = {
       fileName: result.fileName,
       downloadUrl: buildDownloadUrl(req, result.fileName),
@@ -109,6 +136,10 @@ const withMultiple = (fn, tool) => async (req, res, next) => {
       req.body,
       req.files,
     );
+
+    // Verify output exists and is non-empty
+    await verifyOutput(result.outputPath);
+
     const out = {
       fileName: result.fileName,
       downloadUrl: buildDownloadUrl(req, result.fileName),
@@ -121,6 +152,15 @@ const withMultiple = (fn, tool) => async (req, res, next) => {
     success(res, out, "Conversion successful");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
+    await logConversion(
+      req,
+      tool,
+      req.files || [],
+      null,
+      "failed",
+      err.message,
+      startMs,
+    );
     next(err);
   }
 };
@@ -138,6 +178,7 @@ const imageToPdf = async (req, res, next) => {
       orientation,
       margin: parseInt(margin),
     });
+    await verifyOutput(result.outputPath);
     const stat = await fse.stat(result.outputPath);
     const out = {
       fileName: result.fileName,
@@ -157,6 +198,7 @@ const imageToPdf = async (req, res, next) => {
     success(res, out, "Images converted to PDF successfully");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
+    await logConversion(req, "image-to-pdf", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -167,6 +209,7 @@ const pdfToWord = async (req, res, next) => {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No PDF file uploaded", 400);
     const result = await pdfService.pdfToWord(req.file.path);
+    await verifyOutput(result.outputPath);
     const stat = await fse.stat(result.outputPath);
     const out = {
       fileName: result.fileName,
@@ -186,6 +229,7 @@ const pdfToWord = async (req, res, next) => {
     success(res, out, "PDF converted to Word successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "pdf-to-word", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -196,6 +240,7 @@ const wordToPdf = async (req, res, next) => {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No Word file uploaded", 400);
     const result = await pdfService.wordToPdf(req.file.path);
+    await verifyOutput(result.outputPath);
     const stat = await fse.stat(result.outputPath);
     const out = {
       fileName: result.fileName,
@@ -215,6 +260,7 @@ const wordToPdf = async (req, res, next) => {
     success(res, out, "Word document converted to PDF successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "word-to-pdf", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -227,6 +273,7 @@ const pdfMerge = async (req, res, next) => {
       return error(res, "Please upload at least 2 PDF files to merge", 400);
     const pdfPaths = req.files.map((f) => f.path);
     const result = await pdfService.mergePdfs(pdfPaths);
+    await verifyOutput(result.outputPath);
     const stat = await fse.stat(result.outputPath);
     const out = {
       fileName: result.fileName,
@@ -246,6 +293,7 @@ const pdfMerge = async (req, res, next) => {
     success(res, out, `${req.files.length} PDFs merged successfully`);
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
+    await logConversion(req, "pdf-merge", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -256,18 +304,27 @@ const pdfSplit = async (req, res, next) => {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No PDF uploaded", 400);
     const pageFiles = await pdfService.splitPdf(req.file.path);
+    if (!pageFiles?.length) {
+      throw Object.assign(
+        new Error("Could not split the PDF. The file may be empty or corrupted."),
+        { statusCode: 500 },
+      );
+    }
     const zipResult = await compressionService.zipPdfPages(pageFiles);
+    await verifyOutput(zipResult.outputPath || (zipResult.fileName ? path.join(require("../config/constants").OUTPUT_DIR, zipResult.fileName) : null));
     const out = {
       fileName: zipResult.fileName,
       downloadUrl: buildDownloadUrl(req, zipResult.fileName),
       size: zipResult.size,
       pageCount: pageFiles.length,
     };
+    await logConversion(req, "pdf-split", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
     pageFiles.forEach((f) => cleanup(f.filePath));
     success(res, out, `PDF split into ${pageFiles.length} pages`);
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "pdf-split", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -278,19 +335,21 @@ const pdfCompress = async (req, res, next) => {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No PDF uploaded", 400);
     const result = await pdfService.compressPdf(req.file.path);
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "pdf-compress", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "PDF compressed",
-    );
+    success(res, out, "PDF compressed");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "pdf-compress", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
 
 const imageResize = async (req, res, next) => {
+  const startMs = Date.now();
   try {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No image uploaded", 400);
@@ -300,19 +359,21 @@ const imageResize = async (req, res, next) => {
       height,
       fit,
     });
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "image-resize", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "Image resized",
-    );
+    success(res, out, "Image resized");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "image-resize", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
 
 const imageCompress = async (req, res, next) => {
+  const startMs = Date.now();
   try {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No image uploaded", 400);
@@ -321,52 +382,58 @@ const imageCompress = async (req, res, next) => {
       quality,
       format,
     });
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "image-compress", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "Image compressed",
-    );
+    success(res, out, "Image compressed");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "image-compress", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
 
 const imageConvert = async (req, res, next) => {
+  const startMs = Date.now();
   try {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No image uploaded", 400);
     const { format = "jpeg" } = req.body;
     const result = await imageService.convertImageFormat(req.file.path, format);
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "image-convert", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "Image converted",
-    );
+    success(res, out, "Image converted");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "image-convert", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
 
 const textToPdf = async (req, res, next) => {
+  const startMs = Date.now();
   try {
     const { text } = req.body;
     if (!text?.trim()) return error(res, "text field is required", 400);
     const result = await pdfService.textToPdf(text);
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "Text converted to PDF",
-    );
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "text-to-pdf", [], out, "completed", null, startMs);
+    success(res, out, "Text converted to PDF");
   } catch (err) {
+    await logConversion(req, "text-to-pdf", [], null, "failed", err.message, startMs);
     next(err);
   }
 };
 
 const createZip = async (req, res, next) => {
+  const startMs = Date.now();
   try {
     await handleMultipleUpload(req, res);
     if (!req.files?.length) return error(res, "No files uploaded", 400);
@@ -375,14 +442,15 @@ const createZip = async (req, res, next) => {
       archiveName: f.originalname,
     }));
     const result = await compressionService.createZip(files);
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "create-zip", req.files, out, "completed", null, startMs);
     req.files.forEach((f) => cleanup(f.path));
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "ZIP created",
-    );
+    success(res, out, "ZIP created");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
+    await logConversion(req, "create-zip", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -401,7 +469,6 @@ const signPdf = async (req, res, next) => {
     const pdfFile = req.files?.file?.[0];
     if (!pdfFile) return error(res, "No PDF file uploaded", 400);
 
-    // Read uploaded signature image and convert to base64 for the service
     const sigFile = req.files?.signatureImage?.[0];
     let signatureImage = req.body.signatureImage ?? null;
     if (sigFile && !signatureImage) {
@@ -415,6 +482,7 @@ const signPdf = async (req, res, next) => {
       signatureImage,
     });
 
+    await verifyOutput(result.outputPath);
     const out = {
       fileName: result.fileName,
       downloadUrl: buildDownloadUrl(req, result.fileName),
@@ -452,14 +520,15 @@ const comparePdfs = async (req, res, next) => {
       req.files[0].path,
       req.files[1].path,
     );
+    await verifyOutput(result.outputPath);
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    await logConversion(req, "compare-pdfs", req.files, out, "completed", null, startMs);
     req.files.forEach((f) => cleanup(f.path));
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "PDF comparison complete",
-    );
+    success(res, out, "PDF comparison complete");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
+    await logConversion(req, "compare-pdfs", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -474,6 +543,7 @@ const performOcr = async (req, res, next) => {
       lang,
       outputFormat,
     });
+    await verifyOutput(result.outputPath);
     cleanup(req.file.path);
     await logConversion(
       req,
@@ -484,13 +554,12 @@ const performOcr = async (req, res, next) => {
       null,
       startMs,
     );
-    success(
-      res,
-      { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) },
-      "OCR complete",
-    );
+    const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
+    delete out.outputPath;
+    success(res, out, "OCR complete");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
+    await logConversion(req, "ocr", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -525,48 +594,6 @@ const csvToPdf = withSingle((p) => extConverters.csvToPdf(p), "csv-to-pdf");
 const htmlToPdf = withSingle((p) => extConverters.htmlToPdf(p), "html-to-pdf");
 const svgToPdf = withSingle((p) => extConverters.svgToPdf(p), "svg-to-pdf");
 
-module.exports = {
-  imageToPdf,
-  pdfToWord,
-  wordToPdf,
-  pdfMerge,
-  pdfSplit,
-  pdfCompress,
-  imageResize,
-  imageCompress,
-  imageConvert,
-  textToPdf,
-  createZip,
-  // Advanced PDF
-  pdfToJpg,
-  watermarkPdf,
-  signPdf,
-  redactPdf,
-  addPageNumbers,
-  pdfToPdfa,
-  comparePdfs,
-  performOcr,
-  // Extended converters
-  pdfToTxt,
-  pdfToMarkdown,
-  pdfToJson,
-  pdfToXml,
-  pdfToCsv,
-  pdfToEpub,
-  pdfToPptx,
-  pdfToExcel,
-  heicToJpg,
-  gifToPdf,
-  markdownToPdf,
-  csvToPdf,
-  htmlToPdf,
-  svgToPdf,
-  // New tools
-  unlockPdf,
-  protectPdf,
-  organizePdf,
-};
-
 // ── Unlock PDF ────────────────────────────────────────────────────────────────
 async function unlockPdf(req, res, next) {
   const startMs = Date.now();
@@ -575,6 +602,7 @@ async function unlockPdf(req, res, next) {
     if (!req.file) return error(res, "No PDF uploaded", 400);
     const { password = "" } = req.body;
     const result = await pdfService.unlockPdf(req.file.path, password);
+    await verifyOutput(result.outputPath);
     const out = {
       fileName: result.fileName,
       downloadUrl: buildDownloadUrl(req, result.fileName),
@@ -620,6 +648,7 @@ async function protectPdf(req, res, next) {
       userPassword,
       ownerPassword || userPassword,
     );
+    await verifyOutput(result.outputPath);
     const out = {
       fileName: result.fileName,
       downloadUrl: buildDownloadUrl(req, result.fileName),
@@ -659,7 +688,6 @@ async function organizePdf(req, res, next) {
     if (!req.file) return error(res, "No PDF uploaded", 400);
     let pageOrder = req.body.pageOrder;
     if (typeof pageOrder === "string") {
-      // Accepts "1,3,2" or JSON "[1,3,2]"
       try {
         pageOrder = JSON.parse(pageOrder);
       } catch {
@@ -673,6 +701,7 @@ async function organizePdf(req, res, next) {
         400,
       );
     const result = await pdfService.organizePdf(req.file.path, pageOrder);
+    await verifyOutput(result.outputPath);
     const out = {
       fileName: result.fileName,
       downloadUrl: buildDownloadUrl(req, result.fileName),
@@ -704,3 +733,45 @@ async function organizePdf(req, res, next) {
     next(err);
   }
 }
+
+module.exports = {
+  imageToPdf,
+  pdfToWord,
+  wordToPdf,
+  pdfMerge,
+  pdfSplit,
+  pdfCompress,
+  imageResize,
+  imageCompress,
+  imageConvert,
+  textToPdf,
+  createZip,
+  // Advanced PDF
+  pdfToJpg,
+  watermarkPdf,
+  signPdf,
+  redactPdf,
+  addPageNumbers,
+  pdfToPdfa,
+  comparePdfs,
+  performOcr,
+  // Extended converters
+  pdfToTxt,
+  pdfToMarkdown,
+  pdfToJson,
+  pdfToXml,
+  pdfToCsv,
+  pdfToEpub,
+  pdfToPptx,
+  pdfToExcel,
+  heicToJpg,
+  gifToPdf,
+  markdownToPdf,
+  csvToPdf,
+  htmlToPdf,
+  svgToPdf,
+  // New tools
+  unlockPdf,
+  protectPdf,
+  organizePdf,
+};

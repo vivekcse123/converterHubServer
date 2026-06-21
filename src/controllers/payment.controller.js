@@ -5,7 +5,13 @@ const { getRazorpay } = require("../config/razorpay");
 const { success, error } = require("../utils/response");
 const logger = require("../utils/logger");
 
-const PREMIUM_TEMPLATE_IDS = ["ats-professional", "modern-professional", "tech"];
+const PREMIUM_TEMPLATE_IDS = [
+  "ats-professional", "modern-professional", "tech",
+  "sidebar-pro", "banner-dark", "timeline-pro", "corporate-pro",
+  "executive-elite", "luxury-gold", "creative-portfolio-pro",
+  "startup-founder", "product-manager-pro",
+  "photo-government", "photo-executive",
+];
 const TEMPLATE_PRICE_PAISE = 2900; // ₹29 in paise
 
 // POST /api/payments/create-order

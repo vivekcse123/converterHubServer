@@ -16,8 +16,7 @@ const authRoutes = require("./routes/auth.routes");
 const converterRoutes = require("./routes/converter.routes");
 const historyRoutes = require("./routes/history.routes");
 const adminRoutes = require("./routes/admin.routes");
-// AI routes disabled — no OpenAI key configured
-// const aiRoutes     = require("./routes/ai.routes");
+const aiRoutes = require("./routes/ai.routes");
 const jobsRoutes     = require("./routes/jobs.routes");
 const trendingRoutes = require("./routes/trending.routes");
 const paymentRoutes      = require("./routes/payment.routes");
@@ -103,8 +102,13 @@ app.use((req, res, next) => {
 
 // ── Compression & Parsing ─────────────────────────────────────────────────────
 app.use(compression());
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+// Resume JSON bodies can be large (embedded base64 images); other API routes
+// do not need more than 1 MB. Keep the global limit low and override per-route.
+app.use((req, _res, next) => {
+  const limit = req.path.startsWith("/api/resume") ? "2mb" : "1mb";
+  express.json({ limit })(req, _res, next);
+});
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 app.use(
@@ -118,28 +122,74 @@ app.use(
 app.use("/api/", globalRateLimiter);
 
 // ── Static Files (output downloads) ──────────────────────────────────────────
+// Files are UUID-named so guessing is hard, but require a valid JWT to
+// prevent unauthenticated access to other users' conversion outputs.
+const jwt = require("jsonwebtoken");
+app.use("/outputs", (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1]
+      || req.query.token;
+    if (!token) return res.status(401).json({ success: false, message: "Authentication required to download files." });
+    jwt.verify(token, process.env.JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ success: false, message: "Invalid or expired token." });
+  }
+});
 app.use(
   "/outputs",
   express.static(path.join(__dirname, "..", "outputs"), {
     setHeaders: (res, filePath) => {
       const fileName = path.basename(filePath);
       res.setHeader("X-Content-Type-Options", "nosniff");
-      // Allow browsers to cache output files for 10 minutes so re-downloads
-      // are instant; files are UUID-named so there is no stale-cache risk.
-      res.setHeader("Cache-Control", "private, max-age=600");
+      res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
     },
   }),
 );
 
 // ── Health ────────────────────────────────────────────────────────────────────
-app.get("/health", (_req, res) => {
-  res.json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    version: process.env.npm_package_version || "2.0.0",
-  });
+// Public: returns only a simple OK status. Internal details gated by header.
+app.get("/health", async (req, res) => {
+  const internalKey = process.env.HEALTH_SECRET;
+  const isInternal  = internalKey && req.headers["x-health-secret"] === internalKey;
+
+  const payload = { status: "OK", timestamp: new Date().toISOString() };
+
+  if (isInternal) {
+    const mem = process.memoryUsage();
+    payload.uptime  = Math.round(process.uptime());
+    payload.version = process.env.npm_package_version || "2.0.0";
+    payload.memory  = {
+      heapUsedMb:  Math.round(mem.heapUsed  / 1_048_576),
+      heapTotalMb: Math.round(mem.heapTotal / 1_048_576),
+      rssMb:       Math.round(mem.rss       / 1_048_576),
+    };
+    payload.queue = { available: false };
+
+    try {
+      const queueService = require("./services/queue.service");
+      if (queueService.isAvailable) {
+        const stats = await Promise.race([
+          queueService.getQueueStats(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 1_000)),
+        ]);
+        payload.queue = { available: true, ...stats };
+      }
+    } catch { /* Redis may be offline */ }
+
+    try {
+      const fse = require("fs-extra");
+      const { UPLOAD_DIR, OUTPUT_DIR } = require("./config/constants");
+      const [uploadFiles, outputFiles] = await Promise.all([
+        fse.readdir(UPLOAD_DIR).then((f) => f.length).catch(() => -1),
+        fse.readdir(OUTPUT_DIR).then((f) => f.length).catch(() => -1),
+      ]);
+      payload.storage = { uploadsPending: uploadFiles, outputsReady: outputFiles };
+    } catch { payload.storage = { error: "could not read directories" }; }
+  }
+
+  res.json(payload);
 });
 
 // ── Keep-alive ping ───────────────────────────────────────────────────────────
@@ -150,7 +200,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/convert", converterRoutes);
 app.use("/api/history", historyRoutes);
 app.use("/api/admin", adminRoutes);
-// app.use("/api/ai",       aiRoutes);  // disabled — no OpenAI key
+app.use("/api/ai",        aiRoutes);
 app.use("/api/jobs",      jobsRoutes);
 app.use("/api/converters", trendingRoutes);
 app.use("/api/payments",      paymentRoutes);

@@ -7,8 +7,9 @@ const { success, error } = require("../utils/response");
 const logger = require("../utils/logger");
 
 const PLANS = {
-  monthly: { paise: 900,  label: "Pro Monthly" },
-  yearly:  { paise: 9900, label: "Pro Yearly"  },
+  monthly:  { paise: 9900,   label: "Pro Monthly"  },
+  yearly:   { paise: 69900,  label: "Pro Yearly"   },
+  lifetime: { paise: 149900, label: "Pro Lifetime" },
 };
 
 // POST /api/subscriptions/create  { plan: 'monthly' | 'yearly' }
@@ -20,12 +21,16 @@ const createSubscription = async (req, res, next) => {
     }
 
     const existing = req.user.subscription ?? {};
-    const isYearlyActive  = existing.status === "active" && existing.plan === "yearly";
-    const isMonthlyActive = existing.status === "active" && existing.plan === "monthly";
+    const isLifetimeActive = existing.status === "active" && existing.plan === "lifetime";
+    const isYearlyActive   = existing.status === "active" && existing.plan === "yearly";
+    const isMonthlyActive  = existing.status === "active" && existing.plan === "monthly";
 
     // Hierarchy enforcement
+    if (isLifetimeActive) {
+      return error(res, "You already have a Lifetime plan. No upgrade needed.", 400);
+    }
     if (isYearlyActive) {
-      return error(res, "You already have an active Yearly plan. It is the highest tier available.", 400);
+      return error(res, "You already have an active Yearly plan. Upgrade to Lifetime at the pricing page.", 400);
     }
     if (isMonthlyActive && plan === "monthly") {
       return error(res, "You already have an active Monthly plan.", 400);
@@ -162,12 +167,15 @@ const cancelSubscription = async (req, res, next) => {
 // GET /api/subscriptions/status
 const getStatus = (req, res) => {
   const sub = req.user.subscription ?? {};
-  const isPro          = sub.status === "active" && ["monthly", "yearly"].includes(sub.plan);
-  const isYearlyActive = sub.status === "active" && sub.plan === "yearly";
-  const isMonthlyActive= sub.status === "active" && sub.plan === "monthly";
+  const isLifetimeActive = sub.status === "active" && sub.plan === "lifetime";
+  const isYearlyActive   = sub.status === "active" && sub.plan === "yearly";
+  const isMonthlyActive  = sub.status === "active" && sub.plan === "monthly";
+  const isPro = isLifetimeActive || isYearlyActive || isMonthlyActive;
 
   let daysRemaining = 0;
-  if (sub.currentPeriodEnd) {
+  if (isLifetimeActive) {
+    daysRemaining = -1; // sentinel: never expires
+  } else if (sub.currentPeriodEnd) {
     daysRemaining = Math.max(0, Math.ceil((new Date(sub.currentPeriodEnd) - Date.now()) / 86_400_000));
   }
 
@@ -182,8 +190,9 @@ const getStatus = (req, res) => {
     daysRemaining,
     resumeCount:        sub.resumeCount ?? 0,
     totalDownloads:     sub.totalDownloads ?? 0,
-    canPurchaseMonthly: !isYearlyActive && !isMonthlyActive,
-    canPurchaseYearly:  !isYearlyActive,
+    canPurchaseMonthly:  !isPro,
+    canPurchaseYearly:   !isYearlyActive && !isLifetimeActive,
+    canPurchaseLifetime: !isLifetimeActive,
   });
 };
 
@@ -216,6 +225,85 @@ const syncResumeCount = async (req, res) => {
   success(res, {});
 };
 
+// POST /api/subscriptions/create-lifetime-order
+const createLifetimeOrder = async (req, res, next) => {
+  try {
+    const sub = req.user.subscription ?? {};
+    if (sub.status === "active" && sub.plan === "lifetime") {
+      return error(res, "You already have a Lifetime plan.", 400);
+    }
+
+    const rzp = getRazorpay();
+    const order = await rzp.orders.create({
+      amount:   PLANS.lifetime.paise,
+      currency: "INR",
+      receipt:  `lifetime_${req.user._id}_${Date.now()}`,
+      notes:    { userId: req.user._id.toString(), plan: "lifetime" },
+    });
+
+    logger.info(`Lifetime order created: ${order.id} for user ${req.user._id}`);
+    success(res, { orderId: order.id, amount: order.amount, currency: order.currency, keyId: process.env.RAZORPAY_KEY_ID });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/subscriptions/verify-lifetime
+const verifyLifetimePayment = async (req, res, next) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return error(res, "Missing required fields.", 400);
+    }
+
+    const expected = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+
+    if (expected !== razorpay_signature) {
+      logger.warn(`Lifetime payment signature mismatch for order ${razorpay_order_id}`);
+      return error(res, "Payment verification failed — invalid signature.", 400);
+    }
+
+    // Cancel any active Razorpay subscription (upgrading from monthly/yearly)
+    const existingSub = req.user.subscription ?? {};
+    if (existingSub.razorpaySubscriptionId && existingSub.status === "active") {
+      const rzp = getRazorpay();
+      try {
+        await rzp.subscriptions.cancel(existingSub.razorpaySubscriptionId, { cancel_at_cycle_end: false });
+      } catch (e) {
+        logger.warn(`Could not cancel existing subscription ${existingSub.razorpaySubscriptionId}: ${e.message}`);
+      }
+    }
+
+    await User.findByIdAndUpdate(req.user._id, {
+      "subscription.plan":                   "lifetime",
+      "subscription.status":                 "active",
+      "subscription.currentPeriodStart":     new Date(),
+      "subscription.currentPeriodEnd":       null,
+      "subscription.cancelAtPeriodEnd":      false,
+      "subscription.razorpaySubscriptionId": null,
+    });
+
+    await Payment.create({
+      userId:            req.user._id,
+      amount:            PLANS.lifetime.paise,
+      plan:              "lifetime",
+      status:            "captured",
+      razorpayPaymentId: razorpay_payment_id,
+      razorpayOrderId:   razorpay_order_id,
+      billingCycle:      1,
+    });
+
+    logger.info(`Lifetime plan activated for user ${req.user._id} via payment ${razorpay_payment_id}`);
+    success(res, { plan: "lifetime", status: "active" }, "Lifetime access activated! Welcome to Pro forever 🎉");
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   createSubscription,
   verifySubscription,
@@ -224,4 +312,6 @@ module.exports = {
   getPaymentHistory,
   trackDownload,
   syncResumeCount,
+  createLifetimeOrder,
+  verifyLifetimePayment,
 };

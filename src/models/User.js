@@ -45,7 +45,7 @@ const userSchema = new mongoose.Schema(
     subscription: {
       plan: {
         type: String,
-        enum: ["free", "monthly", "yearly"],
+        enum: ["free", "monthly", "yearly", "lifetime"],
         default: "free",
       },
       status: {
@@ -55,11 +55,16 @@ const userSchema = new mongoose.Schema(
       },
       razorpaySubscriptionId: String,
       currentPeriodStart: Date,
-      currentPeriodEnd:   Date,
+      currentPeriodEnd:   Date,   // null for lifetime plans
       cancelAtPeriodEnd:  { type: Boolean, default: false },
       cancelledAt:        Date,
       resumeCount:        { type: Number, default: 0 },
       totalDownloads:     { type: Number, default: 0 },
+      // Admin-granted access fields
+      grantedByAdmin:  { type: Boolean, default: false },
+      adminNotes:      String,
+      adminGrantedAt:  Date,
+      adminGrantedBy:  { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     },
 
     // Usage tracking (reset daily via cron)

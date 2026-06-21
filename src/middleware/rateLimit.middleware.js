@@ -18,22 +18,12 @@ const globalRateLimiter = rateLimit({
   },
 });
 
-/** Stricter limiter for auth routes — skipped for admin/superadmin tokens */
+/** Stricter limiter for auth routes — no bypass; applies to all callers */
 const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 50,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting if request carries a valid admin token
-    try {
-      const jwt = require("jsonwebtoken");
-      const auth = req.headers.authorization?.split(" ")[1];
-      if (!auth) return false;
-      const decoded = jwt.verify(auth, process.env.JWT_SECRET);
-      return !!decoded?.id; // any authenticated user skips auth rate limit
-    } catch { return false; }
-  },
   message: {
     success: false,
     message: "Too many login attempts. Please wait 15 minutes.",

@@ -10,6 +10,8 @@ const { ensureDirectories } = require("./src/config/constants");
 const { initSocket } = require("./sockets/index");
 const { initQueue } = require("./src/services/queue.service");
 const { scheduleSelfPing } = require("./src/utils/selfPing");
+const { recoverStuckJobs } = require("./src/utils/jobRecovery");
+const { scheduleSubscriptionReminders } = require("./src/utils/subscriptionReminder");
 
 const PORT = process.env.PORT || 3000;
 
@@ -24,6 +26,9 @@ const startServer = async () => {
   try {
     await ensureDirectories();
     await connectDB();
+
+    // Recover jobs interrupted by previous crash/restart before accepting traffic
+    await recoverStuckJobs();
 
     // Create HTTP server (needed for Socket.io to share the port)
     const httpServer = http.createServer(app);
@@ -48,6 +53,13 @@ const startServer = async () => {
       scheduleSelfPing();
     } catch (err) {
       logger.warn("Self-ping scheduler failed:", err.message);
+    }
+
+    // Schedule subscription expiry reminder emails
+    try {
+      scheduleSubscriptionReminders();
+    } catch (err) {
+      logger.warn("Subscription reminder scheduler failed:", err.message);
     }
 
     httpServer.listen(PORT, () => {
