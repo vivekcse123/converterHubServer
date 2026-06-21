@@ -1,27 +1,24 @@
 "use strict";
-const PdfPrinter = require("pdfmake");
 
-// Built-in Roboto fonts bundled with pdfmake
-const fonts = {
+const pdfmake = require("pdfmake/js/index.js");
+const vfsFontsModule = require("pdfmake/build/vfs_fonts");
+
+// Initialise pdfmake once at module load (safe — pdfmake is a singleton)
+const _vfs = vfsFontsModule.pdfMake ? vfsFontsModule.pdfMake.vfs : vfsFontsModule.vfs || vfsFontsModule;
+const _storage = pdfmake.virtualfs.storage;
+for (const [key, val] of Object.entries(_vfs)) {
+  _storage[key] = Buffer.from(val, "base64");
+}
+pdfmake.addFonts({
   Roboto: {
-    normal:      require.resolve("pdfmake/build/vfs_fonts.js").replace("vfs_fonts.js", "") + "/../fonts/Roboto-Regular.ttf",
-    bold:        require.resolve("pdfmake/build/vfs_fonts.js").replace("vfs_fonts.js", "") + "/../fonts/Roboto-Medium.ttf",
-    italics:     require.resolve("pdfmake/build/vfs_fonts.js").replace("vfs_fonts.js", "") + "/../fonts/Roboto-Italic.ttf",
-    bolditalics: require.resolve("pdfmake/build/vfs_fonts.js").replace("vfs_fonts.js", "") + "/../fonts/Roboto-MediumItalic.ttf",
+    normal:      "Roboto-Regular.ttf",
+    bold:        "Roboto-Medium.ttf",
+    italics:     "Roboto-Italic.ttf",
+    bolditalics: "Roboto-MediumItalic.ttf",
   },
-};
-
-// Use the VFS-based approach (fonts embedded in pdfmake's vfs) instead of file paths
-const pdfMakeBrowser = (() => {
-  try {
-    const pdfMake = require("pdfmake/build/pdfmake");
-    const vfsFonts = require("pdfmake/build/vfs_fonts");
-    pdfMake.vfs = vfsFonts.pdfMake ? vfsFonts.pdfMake.vfs : vfsFonts.vfs || vfsFonts;
-    return pdfMake;
-  } catch (e) {
-    return null;
-  }
-})();
+});
+pdfmake.setUrlAccessPolicy(() => false);
+pdfmake.setLocalAccessPolicy(() => false);
 
 // Template header styling
 const TEMPLATE_STYLES = {
@@ -283,30 +280,9 @@ function buildDocDef(resume, isPro, templateId) {
  * @param {boolean} isPro - Whether the user has Pro subscription
  * @returns {Promise<Buffer>}
  */
-function generatePdfBuffer(resume, templateId, isPro) {
-  return new Promise((resolve, reject) => {
-    try {
-      const docDef = buildDocDef(resume, isPro, templateId);
-
-      // Use the browser/vfs build of pdfmake that works in both environments
-      if (pdfMakeBrowser) {
-        const pdfDocGenerator = pdfMakeBrowser.createPdf(docDef);
-        pdfDocGenerator.getBuffer((buffer) => resolve(Buffer.from(buffer)));
-        return;
-      }
-
-      // Fallback: PdfPrinter with file-based fonts
-      const printer = new PdfPrinter(fonts);
-      const doc = printer.createPdfKitDocument(docDef);
-      const chunks = [];
-      doc.on("data",  (chunk) => chunks.push(chunk));
-      doc.on("end",   () => resolve(Buffer.concat(chunks)));
-      doc.on("error", reject);
-      doc.end();
-    } catch (err) {
-      reject(err);
-    }
-  });
+async function generatePdfBuffer(resume, templateId, isPro) {
+  const docDef = buildDocDef(resume, isPro, templateId);
+  return pdfmake.createPdf(docDef).getBuffer();
 }
 
 module.exports = { generatePdfBuffer, PREMIUM_TEMPLATE_IDS };
