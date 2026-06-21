@@ -16,10 +16,14 @@ const chatSessions = new Map();
 
 const checkAiLimit = async (user) => {
   if (!user) return true; // anonymous — check based on IP elsewhere
-  const plan = user.subscription?.plan || "free";
-  const limits = SUBSCRIPTION_PLANS[plan];
+  const rawPlan = user.subscription?.plan || "free";
+  // Razorpay plans (monthly/yearly/lifetime) map to the "pro" feature tier
+  const planTier = ["monthly", "yearly", "lifetime"].includes(rawPlan)
+    ? "pro"
+    : (SUBSCRIPTION_PLANS[rawPlan] ? rawPlan : "free");
+  const limits = SUBSCRIPTION_PLANS[planTier];
   if (limits.aiRequestsPerDay === -1) return true; // unlimited
-  return user.usage.aiRequestsToday < limits.aiRequestsPerDay;
+  return (user.usage?.aiRequestsToday ?? 0) < limits.aiRequestsPerDay;
 };
 
 const incrementAiUsage = async (userId) => {
