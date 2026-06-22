@@ -1,6 +1,7 @@
 ﻿FROM node:20-alpine AS build
 
-# Install system dependencies for pdf2pic (ghostscript), sharp, and canvas
+# System deps for canvas/sharp/pdf2pic + Chromium for Puppeteer.
+# Alpine uses musl libc so we must use the distro Chromium (not Puppeteer's bundled glibc Chrome).
 RUN apk add --no-cache \
     ghostscript \
     imagemagick \
@@ -15,7 +16,16 @@ RUN apk add --no-cache \
     libjpeg-turbo-dev \
     giflib-dev \
     pixman-dev \
-    pkgconf
+    pkgconf \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates
+
+# Skip Puppeteer's bundled Chrome download; use the Alpine chromium package instead.
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 COPY package*.json ./

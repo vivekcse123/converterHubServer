@@ -15,8 +15,14 @@ let _browser = null;
 async function getBrowser() {
   if (_browser?.isConnected()) return _browser;
   const puppeteer = require("puppeteer");
+
+  // PUPPETEER_EXECUTABLE_PATH is set in the Dockerfile (Alpine Chromium) or
+  // via Render env vars. Fall back to Puppeteer's own bundled Chrome on dev.
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+
   _browser = await puppeteer.launch({
     headless: "new",
+    executablePath,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -24,6 +30,7 @@ async function getBrowser() {
       "--no-first-run",
       "--no-zygote",
       "--disable-gpu",
+      "--single-process",
     ],
   });
   _browser.on("disconnected", () => { _browser = null; });
