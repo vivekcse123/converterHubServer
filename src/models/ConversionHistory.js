@@ -28,7 +28,8 @@ const conversionHistorySchema = new mongoose.Schema({
 
 conversionHistorySchema.index({ user: 1, createdAt: -1 });
 conversionHistorySchema.index({ tool: 1, createdAt: -1 });
-conversionHistorySchema.index({ status: 1 });
+conversionHistorySchema.index({ status: 1, createdAt: -1 });   // admin filtering by status + time range
+conversionHistorySchema.index({ user: 1, status: 1 });         // "my failed conversions" queries
 
 // TTL: 30 days
 conversionHistorySchema.index({ createdAt: 1 }, { expireAfterSeconds: 2_592_000 });

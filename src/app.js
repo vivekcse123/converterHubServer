@@ -100,8 +100,18 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── Response-time header (visible in browser DevTools Network tab) ────────────
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    res.setHeader("X-Response-Time", `${Date.now() - start}ms`);
+  });
+  next();
+});
+
 // ── Compression & Parsing ─────────────────────────────────────────────────────
-app.use(compression());
+// Use highest compression level for text/JSON — CPU cost is negligible vs latency saved.
+app.use(compression({ level: 6, threshold: 512 }));
 // Resume JSON bodies can be large (embedded base64 images); other API routes
 // do not need more than 1 MB. Keep the global limit low and override per-route.
 app.use((req, _res, next) => {

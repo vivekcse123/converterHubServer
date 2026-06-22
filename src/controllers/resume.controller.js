@@ -9,6 +9,42 @@ const GOOGLE_FONTS_URL =
   "&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,300;1,400" +
   "&family=Georgia&display=swap";
 
+// ── Google Fonts cache ────────────────────────────────────────────────────────
+// On first PDF request we fetch the font CSS + every woff2 file and store them
+// as base64 data-URIs so Puppeteer never makes external network calls for fonts.
+let _fontsCss = null;
+
+async function getEmbeddedFontsCss() {
+  if (_fontsCss !== null) return _fontsCss;
+
+  try {
+    // Request woff2 format by spoofing a modern Linux Chrome UA
+    const cssResp = await fetch(GOOGLE_FONTS_URL, {
+      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+    });
+    const css = await cssResp.text();
+
+    // Find all font file URLs and embed them as base64 data-URIs in parallel
+    const urlMatches = [...css.matchAll(/url\((https:\/\/fonts\.gstatic\.com[^)]+)\)/g)];
+    let embedded = css;
+
+    await Promise.all(urlMatches.map(async ([, url]) => {
+      try {
+        const buf = Buffer.from(await (await fetch(url)).arrayBuffer());
+        embedded = embedded.replace(url, `data:font/woff2;base64,${buf.toString("base64")}`);
+      } catch {}
+    }));
+
+    _fontsCss = embedded;
+    logger.info(`[PDF] Google Fonts embedded (${Math.round(_fontsCss.length / 1024)} KB)`);
+  } catch (err) {
+    logger.warn("[PDF] Could not embed Google Fonts — will use system fonts:", err.message);
+    _fontsCss = ""; // system-font fallback; don't keep retrying
+  }
+
+  return _fontsCss;
+}
+
 // ── Puppeteer browser singleton ───────────────────────────────────────────────
 let _browser = null;
 
@@ -17,7 +53,7 @@ async function getBrowser() {
   const puppeteer = require("puppeteer");
 
   // PUPPETEER_EXECUTABLE_PATH is set in the Dockerfile (Alpine Chromium) or
-  // via Render env vars. Fall back to Puppeteer's own bundled Chrome on dev.
+  // via Render env vars. Falls back to Puppeteer's bundled Chrome in dev.
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
   _browser = await puppeteer.launch({
@@ -30,12 +66,23 @@ async function getBrowser() {
       "--no-first-run",
       "--no-zygote",
       "--disable-gpu",
-      "--single-process",
     ],
   });
   _browser.on("disconnected", () => { _browser = null; });
   return _browser;
 }
+
+// Pre-warm: launch browser + cache fonts at startup so the first real request
+// isn't penalised by a cold Chromium boot (2–3 s) and font fetch (1–2 s).
+async function warmup() {
+  try {
+    await Promise.all([getBrowser(), getEmbeddedFontsCss()]);
+    logger.info("[PDF] Puppeteer browser and Google Fonts pre-warmed");
+  } catch (err) {
+    logger.warn("[PDF] Warmup failed (will retry on first request):", err.message);
+  }
+}
+warmup();
 
 const TEMPLATE_NAMES = {
   "ats-professional":    "ATS Professional",
@@ -208,16 +255,17 @@ const renderHtml = async (req, res, next) => {
     }
   `;
 
-  // All CSS is sent inline by the browser — no external CSS URLs needed.
-  // Puppeteer only fetches Google Fonts from the hardcoded <link>.
+  // Fonts are pre-fetched and embedded as base64 data-URIs on first request,
+  // so Puppeteer never makes external network calls — no latency on subsequent requests.
+  const fontsCss = await getEmbeddedFontsCss();
+
   const fullHtml = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="${GOOGLE_FONTS_URL}" rel="stylesheet">
   <style>
+    /* Google Fonts — embedded as base64 data-URIs (no external fetch) */
+    ${fontsCss}
     @page { size: A4 portrait; margin: 0; }
     html, body { margin: 0; padding: 0; width: 210mm; background: white; color-scheme: light; }
     *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -247,21 +295,18 @@ const renderHtml = async (req, res, next) => {
     const browser = await getBrowser();
     page = await browser.newPage();
 
-    // Set viewport to A4 at 96 DPI (210mm × 297mm).
     await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 });
-
-    // Use screen media so @media print rules don't strip the template's
-    // padding (print.css resets padding:0 on .resume-page for the old
-    // window.print() path — we want the designed screen layout instead).
+    // Use screen media so @media print rules don't strip template padding.
     await page.emulateMediaType("screen");
 
-    // Load the complete HTML with all CSS already inlined.
-    await page.setContent(fullHtml, { waitUntil: "load", timeout: 30_000 });
+    // All fonts are embedded inline — domcontentloaded is enough; no external
+    // resources to wait for, so we don't block on network here.
+    await page.setContent(fullHtml, { waitUntil: "domcontentloaded", timeout: 30_000 });
 
-    // Wait for web fonts (Google Fonts) to finish rendering.
+    // Wait for the font-face descriptors to parse and apply.
     await page.evaluate(() => document.fonts.ready);
-    // Extra safety buffer for font swap + final layout pass.
-    await new Promise(r => setTimeout(r, 400));
+    // Small layout-stabilisation buffer (reduced from 400 ms — fonts are local).
+    await new Promise(r => setTimeout(r, 150));
 
     const rawPdf = await page.pdf({
       format:          "A4",
@@ -300,4 +345,4 @@ const renderHtml = async (req, res, next) => {
   }
 };
 
-module.exports = { generatePdf, getDownloadLogs, renderHtml };
+module.exports = { generatePdf, getDownloadLogs, renderHtml, warmup };

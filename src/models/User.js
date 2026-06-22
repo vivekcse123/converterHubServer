@@ -1,6 +1,7 @@
 ﻿"use strict";
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const userCache = require("../utils/userCache");
 
 const userSchema = new mongoose.Schema(
   {
@@ -110,7 +111,18 @@ const userSchema = new mongoose.Schema(
 
 // Indexes
 userSchema.index({ "subscription.plan": 1 });
+userSchema.index({ "subscription.status": 1 });
 userSchema.index({ createdAt: -1 });
+// Compound indexes for common query patterns
+userSchema.index({ email: 1, isActive: 1 });   // login + active-check in one hit
+userSchema.index({ isActive: 1, role: 1 });    // admin user-list filtering
+userSchema.index({ isBanned: 1, createdAt: -1 });
+userSchema.index({ passwordResetToken: 1, passwordResetExpires: 1 }, { sparse: true });
+
+// Auto-invalidate the in-process user cache on any mutation so auth middleware
+// never serves stale subscription / ban state beyond the TTL window.
+userSchema.post("save", function () { userCache.invalidate(this._id); });
+userSchema.post("findOneAndUpdate", function (doc) { if (doc) userCache.invalidate(doc._id); });
 
 // Hash password before save
 userSchema.pre("save", async function (next) {

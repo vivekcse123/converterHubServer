@@ -12,6 +12,7 @@ const { initQueue } = require("./src/services/queue.service");
 const { scheduleSelfPing } = require("./src/utils/selfPing");
 const { recoverStuckJobs } = require("./src/utils/jobRecovery");
 const { scheduleSubscriptionReminders } = require("./src/utils/subscriptionReminder");
+const { warmup: warmupPdf } = require("./src/controllers/resume.controller");
 
 const PORT = process.env.PORT || 3000;
 
@@ -65,6 +66,8 @@ const startServer = async () => {
     httpServer.listen(PORT, () => {
       logger.info(`Converter Hub API v2.0 → http://localhost:${PORT}`);
       logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
+      // Pre-warm Puppeteer browser + cache Google Fonts so first PDF request is fast.
+      warmupPdf();
     });
 
     const shutdown = (signal) => {

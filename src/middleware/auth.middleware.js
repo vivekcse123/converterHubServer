@@ -3,6 +3,17 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { error } = require("../utils/response");
+const userCache = require("../utils/userCache");
+
+async function _fetchUser(id) {
+  let user = userCache.get(id);
+  if (user) return user;
+  // .lean() returns a plain JS object — ~3× faster than a full Mongoose document
+  // for read-only use. Downstream code reads properties only; no .save() on req.user.
+  user = await User.findById(id).select("-password -refreshTokens").lean();
+  if (user) userCache.set(id, user);
+  return user;
+}
 
 /**
  * Protect routes — verifies the Bearer JWT and attaches req.user.
@@ -17,7 +28,7 @@ const protect = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const user = await User.findById(decoded.id).select("-password");
+    const user = await _fetchUser(decoded.id);
     if (!user || !user.isActive) {
       return error(res, "User not found or deactivated", 401);
     }
@@ -44,7 +55,7 @@ const optionalAuth = async (req, _res, next) => {
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.split(" ")[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select("-password");
+      req.user = await _fetchUser(decoded.id);
     }
   } catch {
     // Silently ignore invalid tokens for optional auth

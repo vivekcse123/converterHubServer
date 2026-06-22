@@ -18,6 +18,8 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ userId: 1, createdAt: -1 });
+paymentSchema.index({ status: 1, createdAt: -1 });   // admin revenue reports / failed-payment dashboards
+paymentSchema.index({ plan: 1, createdAt: -1 });      // plan-breakdown analytics
 
 // Auto-generate invoice number before save
 paymentSchema.pre("save", function (next) {

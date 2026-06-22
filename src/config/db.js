@@ -13,8 +13,9 @@ const connectDB = async () => {
     await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 20000,
-      maxPoolSize: 10,
-      minPoolSize: 2,   // keep 2 connections warm — avoids cold-connection latency on first request
+      maxPoolSize: 25,   // increased from 10 — prevents connection exhaustion under concurrent PDF/conversion load
+      minPoolSize: 5,    // keep 5 connections warm
+      maxIdleTimeMS: 60_000,
     });
     logger.info(`MongoDB connected: ${mongoose.connection.host}`);
   } catch (err) {
