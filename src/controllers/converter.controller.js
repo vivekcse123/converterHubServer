@@ -97,7 +97,6 @@ const withSingle = (fn, tool) => async (req, res, next) => {
     if (!req.file) return error(res, "No file uploaded", 400);
     const result = await fn(req.file.path, req.body);
 
-    // Verify output exists and is non-empty before returning URL
     await verifyOutput(result.outputPath);
 
     const stat = await fse.stat(result.outputPath).catch(() => ({ size: result.size || 0 }));
@@ -108,21 +107,14 @@ const withSingle = (fn, tool) => async (req, res, next) => {
       ...result,
     };
     delete out.outputPath;
-    await logConversion(req, tool, [req.file], out, "completed", null, startMs);
+    // Respond immediately — don't block the client waiting for DB logging.
     cleanup(req.file.path);
     success(res, out, "Conversion successful");
+    logConversion(req, tool, [req.file], out, "completed", null, startMs);
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(
-      req,
-      tool,
-      req.file ? [req.file] : [],
-      null,
-      "failed",
-      err.message,
-      startMs,
-    );
     next(err);
+    logConversion(req, tool, req.file ? [req.file] : [], null, "failed", err.message, startMs);
   }
 };
 
@@ -137,7 +129,6 @@ const withMultiple = (fn, tool) => async (req, res, next) => {
       req.files,
     );
 
-    // Verify output exists and is non-empty
     await verifyOutput(result.outputPath);
 
     const out = {
@@ -147,21 +138,14 @@ const withMultiple = (fn, tool) => async (req, res, next) => {
       ...result,
     };
     delete out.outputPath;
-    await logConversion(req, tool, req.files, out, "completed", null, startMs);
+    // Respond immediately — don't block the client waiting for DB logging.
     req.files.forEach((f) => cleanup(f.path));
     success(res, out, "Conversion successful");
+    logConversion(req, tool, req.files, out, "completed", null, startMs);
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
-    await logConversion(
-      req,
-      tool,
-      req.files || [],
-      null,
-      "failed",
-      err.message,
-      startMs,
-    );
     next(err);
+    logConversion(req, tool, req.files || [], null, "failed", err.message, startMs);
   }
 };
 
@@ -185,7 +169,7 @@ const imageToPdf = async (req, res, next) => {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: stat.size,
     };
-    await logConversion(
+    logConversion(
       req,
       "image-to-pdf",
       req.files,
@@ -198,7 +182,7 @@ const imageToPdf = async (req, res, next) => {
     success(res, out, "Images converted to PDF successfully");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
-    await logConversion(req, "image-to-pdf", req.files || [], null, "failed", err.message, startMs);
+    logConversion(req, "image-to-pdf", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -216,7 +200,7 @@ const pdfToWord = async (req, res, next) => {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: stat.size,
     };
-    await logConversion(
+    logConversion(
       req,
       "pdf-to-word",
       [req.file],
@@ -229,7 +213,7 @@ const pdfToWord = async (req, res, next) => {
     success(res, out, "PDF converted to Word successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "pdf-to-word", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "pdf-to-word", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -247,7 +231,7 @@ const wordToPdf = async (req, res, next) => {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: stat.size,
     };
-    await logConversion(
+    logConversion(
       req,
       "word-to-pdf",
       [req.file],
@@ -260,7 +244,7 @@ const wordToPdf = async (req, res, next) => {
     success(res, out, "Word document converted to PDF successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "word-to-pdf", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "word-to-pdf", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -280,7 +264,7 @@ const pdfMerge = async (req, res, next) => {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: stat.size,
     };
-    await logConversion(
+    logConversion(
       req,
       "pdf-merge",
       req.files,
@@ -293,7 +277,7 @@ const pdfMerge = async (req, res, next) => {
     success(res, out, `${req.files.length} PDFs merged successfully`);
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
-    await logConversion(req, "pdf-merge", req.files || [], null, "failed", err.message, startMs);
+    logConversion(req, "pdf-merge", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -318,13 +302,13 @@ const pdfSplit = async (req, res, next) => {
       size: zipResult.size,
       pageCount: pageFiles.length,
     };
-    await logConversion(req, "pdf-split", [req.file], out, "completed", null, startMs);
+    logConversion(req, "pdf-split", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
     pageFiles.forEach((f) => cleanup(f.filePath));
     success(res, out, `PDF split into ${pageFiles.length} pages`);
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "pdf-split", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "pdf-split", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -338,12 +322,12 @@ const pdfCompress = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "pdf-compress", [req.file], out, "completed", null, startMs);
+    logConversion(req, "pdf-compress", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
     success(res, out, "PDF compressed");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "pdf-compress", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "pdf-compress", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -362,12 +346,12 @@ const imageResize = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "image-resize", [req.file], out, "completed", null, startMs);
+    logConversion(req, "image-resize", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
     success(res, out, "Image resized");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "image-resize", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "image-resize", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -385,12 +369,12 @@ const imageCompress = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "image-compress", [req.file], out, "completed", null, startMs);
+    logConversion(req, "image-compress", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
     success(res, out, "Image compressed");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "image-compress", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "image-compress", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -405,12 +389,12 @@ const imageConvert = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "image-convert", [req.file], out, "completed", null, startMs);
+    logConversion(req, "image-convert", [req.file], out, "completed", null, startMs);
     cleanup(req.file.path);
     success(res, out, "Image converted");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "image-convert", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "image-convert", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -424,10 +408,10 @@ const textToPdf = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "text-to-pdf", [], out, "completed", null, startMs);
+    logConversion(req, "text-to-pdf", [], out, "completed", null, startMs);
     success(res, out, "Text converted to PDF");
   } catch (err) {
-    await logConversion(req, "text-to-pdf", [], null, "failed", err.message, startMs);
+    logConversion(req, "text-to-pdf", [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -445,12 +429,12 @@ const createZip = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "create-zip", req.files, out, "completed", null, startMs);
+    logConversion(req, "create-zip", req.files, out, "completed", null, startMs);
     req.files.forEach((f) => cleanup(f.path));
     success(res, out, "ZIP created");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
-    await logConversion(req, "create-zip", req.files || [], null, "failed", err.message, startMs);
+    logConversion(req, "create-zip", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -488,14 +472,14 @@ const signPdf = async (req, res, next) => {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: result.size,
     };
-    await logConversion(req, "sign-pdf", [pdfFile], out, "completed", null, startMs);
+    logConversion(req, "sign-pdf", [pdfFile], out, "completed", null, startMs);
     cleanup(pdfFile.path);
     if (sigFile) cleanup(sigFile.path);
     success(res, out, "PDF signed successfully");
   } catch (err) {
     if (req.files?.file?.[0])           cleanup(req.files.file[0].path);
     if (req.files?.signatureImage?.[0]) cleanup(req.files.signatureImage[0].path);
-    await logConversion(req, "sign-pdf", [], null, "failed", err.message, startMs);
+    logConversion(req, "sign-pdf", [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -523,12 +507,12 @@ const comparePdfs = async (req, res, next) => {
     await verifyOutput(result.outputPath);
     const out = { ...result, downloadUrl: buildDownloadUrl(req, result.fileName) };
     delete out.outputPath;
-    await logConversion(req, "compare-pdfs", req.files, out, "completed", null, startMs);
+    logConversion(req, "compare-pdfs", req.files, out, "completed", null, startMs);
     req.files.forEach((f) => cleanup(f.path));
     success(res, out, "PDF comparison complete");
   } catch (err) {
     if (req.files) req.files.forEach((f) => cleanup(f.path));
-    await logConversion(req, "compare-pdfs", req.files || [], null, "failed", err.message, startMs);
+    logConversion(req, "compare-pdfs", req.files || [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -545,7 +529,7 @@ const performOcr = async (req, res, next) => {
     });
     await verifyOutput(result.outputPath);
     cleanup(req.file.path);
-    await logConversion(
+    logConversion(
       req,
       "ocr",
       [req.file],
@@ -559,7 +543,7 @@ const performOcr = async (req, res, next) => {
     success(res, out, "OCR complete");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(req, "ocr", req.file ? [req.file] : [], null, "failed", err.message, startMs);
+    logConversion(req, "ocr", req.file ? [req.file] : [], null, "failed", err.message, startMs);
     next(err);
   }
 };
@@ -608,7 +592,7 @@ async function unlockPdf(req, res, next) {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: result.size,
     };
-    await logConversion(
+    logConversion(
       req,
       "unlock-pdf",
       [req.file],
@@ -621,7 +605,7 @@ async function unlockPdf(req, res, next) {
     success(res, out, "PDF unlocked successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(
+    logConversion(
       req,
       "unlock-pdf",
       req.file ? [req.file] : [],
@@ -654,7 +638,7 @@ async function protectPdf(req, res, next) {
       downloadUrl: buildDownloadUrl(req, result.fileName),
       size: result.size,
     };
-    await logConversion(
+    logConversion(
       req,
       "protect-pdf",
       [req.file],
@@ -667,7 +651,7 @@ async function protectPdf(req, res, next) {
     success(res, out, "PDF protected successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(
+    logConversion(
       req,
       "protect-pdf",
       req.file ? [req.file] : [],
@@ -708,7 +692,7 @@ async function organizePdf(req, res, next) {
       size: result.size,
       pageCount: result.pageCount,
     };
-    await logConversion(
+    logConversion(
       req,
       "organize-pdf",
       [req.file],
@@ -721,7 +705,7 @@ async function organizePdf(req, res, next) {
     success(res, out, "PDF organized successfully");
   } catch (err) {
     if (req.file) cleanup(req.file.path);
-    await logConversion(
+    logConversion(
       req,
       "organize-pdf",
       req.file ? [req.file] : [],

@@ -2,7 +2,7 @@
 
 const multer = require("multer");
 const path = require("path");
-const fs = require("fs");
+const fse = require("fs-extra");
 const { v4: uuidv4 } = require("uuid");
 const {
   ALLOWED_MIME_TYPES,
@@ -10,10 +10,8 @@ const {
   UPLOAD_DIR,
 } = require("./constants");
 
-// Ensure upload directory exists
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-}
+// Ensure upload directory exists (async — doesn't block the event loop).
+fse.ensureDir(UPLOAD_DIR).catch(() => {});
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
