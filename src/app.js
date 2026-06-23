@@ -101,11 +101,17 @@ app.use((req, res, next) => {
 });
 
 // ── Response-time header (visible in browser DevTools Network tab) ────────────
+// Override res.end() so the header is written BEFORE the response is flushed.
+// Using res.on("finish") is wrong — headers are already sent by that event.
 app.use((req, res, next) => {
   const start = Date.now();
-  res.on("finish", () => {
-    res.setHeader("X-Response-Time", `${Date.now() - start}ms`);
-  });
+  const _end = res.end.bind(res);
+  res.end = function (...args) {
+    if (!res.headersSent) {
+      res.setHeader("X-Response-Time", `${Date.now() - start}ms`);
+    }
+    return _end(...args);
+  };
   next();
 });
 
