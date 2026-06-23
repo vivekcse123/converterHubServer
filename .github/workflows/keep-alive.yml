@@ -1,0 +1,45 @@
+name: Keep Backend Alive
+
+# GitHub Actions is an external pinger — it runs even when the Render process
+# is hibernated, unlike the in-process node-cron self-ping which stops when
+# Render sleeps the dyno. Running every 5 minutes keeps the free-tier service
+# warm 24/7 so users never experience a cold-start delay.
+
+on:
+  schedule:
+    # Every 5 minutes, 24/7. GitHub Actions minimum granularity is 5 minutes.
+    # Note: GitHub may delay triggers by up to ~15 min under heavy load — the
+    # internal self-ping (selfPing.js) acts as a second layer while the server
+    # is already running.
+    - cron: '*/5 * * * *'
+
+  # Allow manual trigger from the Actions tab for testing
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping Render Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Ping health endpoint
+        run: |
+          BACKEND_URL="${{ secrets.BACKEND_URL || 'https://converterhubserver-i5kt.onrender.com' }}"
+          echo "Pinging: $BACKEND_URL/ping"
+
+          STATUS=$(curl -s -o /tmp/body.txt -w "%{http_code}" \
+            --max-time 55 \
+            --retry 2 \
+            --retry-delay 5 \
+            "$BACKEND_URL/ping")
+
+          BODY=$(cat /tmp/body.txt)
+          echo "HTTP status : $STATUS"
+          echo "Response    : $BODY"
+
+          if [ "$STATUS" = "200" ]; then
+            echo "Backend is warm and healthy."
+          else
+            echo "Warning: backend returned HTTP $STATUS — may still be waking up."
+          fi

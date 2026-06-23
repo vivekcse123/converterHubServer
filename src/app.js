@@ -100,15 +100,30 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Response-time header (visible in browser DevTools Network tab) ────────────
+// ── Response-time header + slow-request logging ───────────────────────────────
 // Override res.end() so the header is written BEFORE the response is flushed.
-// Using res.on("finish") is wrong — headers are already sent by that event.
+// Also emits a structured warning for any request that exceeds the thresholds
+// below so bottlenecks are visible in Render logs without any extra tooling.
+//   SLOW     > 500 ms  (target: login/auth APIs should be < 500 ms)
+//   VERY_SLOW > 1000 ms (resume generation, conversions expected here)
+//   CRITICAL > 3000 ms (investigate immediately)
+const SKIP_PERF_LOG = new Set(["/health", "/ping"]);
 app.use((req, res, next) => {
   const start = Date.now();
   const _end = res.end.bind(res);
   res.end = function (...args) {
+    const ms = Date.now() - start;
     if (!res.headersSent) {
-      res.setHeader("X-Response-Time", `${Date.now() - start}ms`);
+      res.setHeader("X-Response-Time", `${ms}ms`);
+    }
+    if (!SKIP_PERF_LOG.has(req.path)) {
+      if (ms > 3_000) {
+        logger.error(`CRITICAL ${req.method} ${req.path} ${ms}ms [${res.statusCode}]`);
+      } else if (ms > 1_000) {
+        logger.warn(`VERY_SLOW ${req.method} ${req.path} ${ms}ms [${res.statusCode}]`);
+      } else if (ms > 500) {
+        logger.warn(`SLOW ${req.method} ${req.path} ${ms}ms [${res.statusCode}]`);
+      }
     }
     return _end(...args);
   };

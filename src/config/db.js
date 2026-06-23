@@ -15,9 +15,10 @@ const connectDB = async () => {
       socketTimeoutMS: 45_000,
       connectTimeoutMS: 30_000,
       maxPoolSize: 10,
-      minPoolSize: 1,    // only 1 warm connection at startup; pool grows on demand
-      maxIdleTimeMS: 60_000,
-      family: 4,         // force IPv4 — avoids Alpine musl IPv6 SRV lookup issues
+      minPoolSize: 2,              // keep 2 warm connections so post-wake queries don't wait for pool growth
+      maxIdleTimeMS: 120_000,      // hold idle connections for 2 min (was 1 min) to survive brief lulls
+      heartbeatFrequencyMS: 10_000, // check Atlas every 10 s — detects stale connections fast
+      family: 4,                   // force IPv4 — avoids Alpine musl IPv6 SRV lookup issues
     });
     logger.info(`MongoDB connected: ${mongoose.connection.host}`);
   } catch (err) {
