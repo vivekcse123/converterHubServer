@@ -11,11 +11,13 @@ const connectDB = async () => {
 
   try {
     await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 20000,
-      maxPoolSize: 25,   // increased from 10 — prevents connection exhaustion under concurrent PDF/conversion load
-      minPoolSize: 5,    // keep 5 connections warm
+      serverSelectionTimeoutMS: 30_000,  // 5 s was too short for cold Render → Atlas handshake
+      socketTimeoutMS: 45_000,
+      connectTimeoutMS: 30_000,
+      maxPoolSize: 10,
+      minPoolSize: 1,    // only 1 warm connection at startup; pool grows on demand
       maxIdleTimeMS: 60_000,
+      family: 4,         // force IPv4 — avoids Alpine musl IPv6 SRV lookup issues
     });
     logger.info(`MongoDB connected: ${mongoose.connection.host}`);
   } catch (err) {
