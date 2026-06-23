@@ -71,14 +71,14 @@ const login = async (req, res, next) => {
 
     const accessToken = signAccessToken(user._id);
     const refreshToken = signRefreshToken(user._id);
-    // Atomic push with $slice — keeps the last 5 tokens, no full-doc save needed
-    await User.findByIdAndUpdate(user._id, {
-      $push: { refreshTokens: { $each: [{ token: refreshToken }], $slice: -5 } },
-    });
-    // Fire-and-forget metadata — never blocks the login response
+
+    // Respond immediately — tokens are cryptographically valid the moment they're
+    // signed; the client doesn't need to wait for the DB to record them.
+    // Merge all three field updates into one round-trip, completely off critical path.
     User.findByIdAndUpdate(user._id, {
-      $set: { lastLoginAt: new Date(), lastLoginIp: req.ip },
-      $inc: { loginCount: 1 },
+      $push: { refreshTokens: { $each: [{ token: refreshToken }], $slice: -5 } },
+      $set:  { lastLoginAt: new Date(), lastLoginIp: req.ip },
+      $inc:  { loginCount: 1 },
     }).catch(() => {});
 
     success(
@@ -113,19 +113,22 @@ const refresh = async (req, res, next) => {
 
     const newAccessToken = signAccessToken(user._id);
     const newRefreshToken = signRefreshToken(user._id);
-    // Rotate: pull old token, push new — two targeted atomic ops, no full-doc save
-    await User.findByIdAndUpdate(user._id, {
-      $pull: { refreshTokens: { token: refreshToken } },
-    });
-    await User.findByIdAndUpdate(user._id, {
-      $push: { refreshTokens: { $each: [{ token: newRefreshToken }], $slice: -10 } },
-    });
 
+    // Return new tokens immediately — rotation bookkeeping happens in background.
+    // MongoDB doesn't allow $pull + $push on the same array in one op, so two
+    // calls are unavoidable, but both are off the response critical path.
     success(res, {
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
       token: newAccessToken,
     });
+
+    User.findByIdAndUpdate(user._id, {
+      $pull: { refreshTokens: { token: refreshToken } },
+    }).catch(() => {});
+    User.findByIdAndUpdate(user._id, {
+      $push: { refreshTokens: { $each: [{ token: newRefreshToken }], $slice: -10 } },
+    }).catch(() => {});
   } catch (err) {
     next(err);
   }

@@ -118,6 +118,8 @@ userSchema.index({ email: 1, isActive: 1 });   // login + active-check in one hi
 userSchema.index({ isActive: 1, role: 1 });    // admin user-list filtering
 userSchema.index({ isBanned: 1, createdAt: -1 });
 userSchema.index({ passwordResetToken: 1, passwordResetExpires: 1 }, { sparse: true });
+// Sparse: excludes users who've never logged in — keeps the index small
+userSchema.index({ lastLoginAt: -1 }, { sparse: true });
 
 // Auto-invalidate the in-process user cache on any mutation so auth middleware
 // never serves stale subscription / ban state beyond the TTL window.

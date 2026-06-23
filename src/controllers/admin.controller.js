@@ -246,13 +246,25 @@ const resetUserUsage = async (req, res, next) => {
 
 // ── Analytics ────────────────────────────────────────────────────────────────
 
+// 5-minute TTL in-memory cache for analytics overview.
+// Admin dashboards don't need real-time accuracy; stale-by-5-min is fine.
+// This turns a 10-query Atlas round-trip into a ~1ms in-process read on cache hit.
+let _overviewCache = null;
+let _overviewCachedAt = 0;
+const OVERVIEW_TTL_MS = 5 * 60 * 1_000;
+
 // GET /api/admin/analytics/overview
 const getAnalyticsOverview = async (req, res, next) => {
   try {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const week = new Date(today - 7 * 86_400_000);
-    const month = new Date(now.getFullYear(), now.getMonth(), 1);
+    const now = Date.now();
+    if (_overviewCache && now - _overviewCachedAt < OVERVIEW_TTL_MS) {
+      return success(res, _overviewCache);
+    }
+
+    const nowDate = new Date();
+    const today = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
+    const week  = new Date(now - 7 * 86_400_000);
+    const month = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1);
 
     const [
       totalUsers,
@@ -266,19 +278,22 @@ const getAnalyticsOverview = async (req, res, next) => {
       failedConversions,
       activeUsers,
     ] = await Promise.all([
-      User.countDocuments(),
+      // estimatedDocumentCount() reads collection metadata — no index scan needed.
+      // Safe for totals where ±1% accuracy is acceptable.
+      User.estimatedDocumentCount(),
       User.countDocuments({ createdAt: { $gte: today } }),
       User.countDocuments({ createdAt: { $gte: week } }),
       User.countDocuments({ createdAt: { $gte: month } }),
-      ConversionHistory.countDocuments(),
+      ConversionHistory.estimatedDocumentCount(),
       ConversionHistory.countDocuments({ createdAt: { $gte: today } }),
       ConversionHistory.countDocuments({ createdAt: { $gte: week } }),
       ConversionHistory.countDocuments({ createdAt: { $gte: month } }),
       ConversionHistory.countDocuments({ status: "failed" }),
+      // Uses the new sparse lastLoginAt index — no full-collection scan
       User.countDocuments({ lastLoginAt: { $gte: week } }),
     ]);
 
-    success(res, {
+    _overviewCache = {
       users: {
         total: totalUsers,
         today: newUsersToday,
@@ -293,7 +308,10 @@ const getAnalyticsOverview = async (req, res, next) => {
         month: monthConversions,
         failed: failedConversions,
       },
-    });
+    };
+    _overviewCachedAt = now;
+
+    success(res, _overviewCache);
   } catch (err) {
     next(err);
   }
