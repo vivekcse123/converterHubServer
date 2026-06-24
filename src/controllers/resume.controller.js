@@ -158,9 +158,14 @@ const generatePdf = async (req, res) => {
   }
 
   // ── Generate PDF ─────────────────────────────────────────────────────────────
+  // hasFullAccess = true means no watermark. True when:
+  //   - user has a Pro subscription, OR
+  //   - user purchased this specific template individually, OR
+  //   - template is free (watermark never appears on free templates)
+  const hasFullAccess = userIsPro || templatePurchased || !isPremiumTmpl;
   let pdfBuffer;
   try {
-    pdfBuffer = await generatePdfBuffer(resume, templateId, userIsPro);
+    pdfBuffer = await generatePdfBuffer(resume, templateId, hasFullAccess);
   } catch (err) {
     console.error("PDF generation error:", err);
     return error(res, "PDF generation failed. Please try again.", 500);
@@ -238,13 +243,19 @@ const renderHtml = async (req, res, next) => {
     inlineStyles = "",
     cssVarsCss   = "",
     filename     = "resume",
+    templateId   = "",
   } = req.body;
 
   if (!html) return error(res, "html is required", 400);
 
-  // Server-side watermark decision — never trust the client
-  const userIsPro = isPro(req.user);
-  const watermarkCss = userIsPro ? "" : `
+  // Server-side watermark decision — never trust the client for access rights.
+  // Watermark is shown ONLY when the user is downloading a PREMIUM template they
+  // haven't paid for. Free templates never carry a watermark regardless of plan.
+  const userIsPro         = isPro(req.user);
+  const isPremiumTmpl     = PREMIUM_TEMPLATE_IDS.includes(templateId);
+  const templatePurchased = hasPurchasedTemplate(req.user, templateId);
+  const needsWatermark    = isPremiumTmpl && !userIsPro && !templatePurchased;
+  const watermarkCss = needsWatermark ? `
     body::after {
       content: 'ApnaConverter.com  \\2022  Upgrade to Pro';
       position: fixed; top: 50%; left: 50%;
@@ -253,7 +264,7 @@ const renderHtml = async (req, res, next) => {
       color: rgba(0,0,0,0.07); white-space: nowrap;
       pointer-events: none; z-index: 99999;
     }
-  `;
+  ` : "";
 
   // Fonts are pre-fetched and embedded as base64 data-URIs on first request,
   // so Puppeteer never makes external network calls — no latency on subsequent requests.
@@ -273,10 +284,13 @@ const renderHtml = async (req, res, next) => {
     .preview-page-host, .shadow-card { box-shadow: none !important; }
     :root { ${cssVarsCss} }
     ${inlineStyles}
-    /* Fix: force full-bleed headers to exactly A4 width (avoids 1px rounding gap on right edge) */
-    .modern-header {
+    /* Full-bleed header fix: every template that uses -mx-[16mm] -mt-[14mm] Tailwind
+       classes to bleed the header to A4 edges needs an explicit override so Puppeteer
+       produces the same result as the browser editor preview. */
+    .modern-header, .bold-header, .creative-header, .elegant-header, .tech-header {
       width: 210mm !important;
       margin-left: -16mm !important;
+      margin-right: -16mm !important;
       margin-top: -14mm !important;
       box-sizing: border-box !important;
     }
@@ -305,8 +319,9 @@ const renderHtml = async (req, res, next) => {
 
     // Wait for the font-face descriptors to parse and apply.
     await page.evaluate(() => document.fonts.ready);
-    // Small layout-stabilisation buffer (reduced from 400 ms — fonts are local).
-    await new Promise(r => setTimeout(r, 150));
+    // Layout-stabilisation buffer. Matched to the 500 ms the frontend waits before
+    // capturing outerHTML, so Puppeteer and the browser see the same render state.
+    await new Promise(r => setTimeout(r, 500));
 
     const rawPdf = await page.pdf({
       format:          "A4",

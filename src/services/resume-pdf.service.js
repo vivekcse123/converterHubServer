@@ -281,10 +281,11 @@ function buildDocDef(resume, isPro, templateId) {
     },
   };
 
-  // Watermark for free users
-  if (!isPro) {
+  // Watermark only for premium templates when user hasn't paid for them.
+  // Free templates are delivered clean regardless of subscription status.
+  if (!isPro && PREMIUM_TEMPLATE_IDS.includes(templateId)) {
     docDef.watermark = {
-      text: "ApnaConverter.com  •  Free Version  •  Upgrade to Pro",
+      text: "ApnaConverter.com  •  Upgrade to Pro",
       color: "#94a3b8",
       opacity: 0.15,
       bold: true,
