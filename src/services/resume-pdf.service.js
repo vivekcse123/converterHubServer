@@ -36,10 +36,10 @@ const TEMPLATE_STYLES = {
 
 const PREMIUM_TEMPLATE_IDS = [
   "ats-professional", "modern-professional", "tech",
-  "sidebar-pro", "banner-dark", "timeline-pro", "corporate-pro",
-  "executive-elite", "luxury-gold", "creative-portfolio-pro",
-  "startup-founder", "product-manager-pro",
+  "executive-elite", "creative-portfolio-pro",
+  "startup-founder",
   "photo-government", "photo-executive",
+  "sales-achiever",
 ];
 
 function formatDate(str) {

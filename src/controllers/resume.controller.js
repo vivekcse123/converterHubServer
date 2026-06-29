@@ -66,6 +66,10 @@ async function getBrowser() {
       "--no-first-run",
       "--no-zygote",
       "--disable-gpu",
+      // Force sRGB colour profile so accent colours in the PDF match the live preview
+      // exactly. Without this, headless Chromium may apply a different colour transform
+      // that shifts saturated colours (e.g. the resume header purple becomes darker).
+      "--force-color-profile=srgb",
     ],
   });
   _browser.on("disconnected", () => { _browser = null; });
@@ -244,6 +248,7 @@ const renderHtml = async (req, res, next) => {
     cssVarsCss   = "",
     filename     = "resume",
     templateId   = "",
+    paperSize    = "a4",
   } = req.body;
 
   if (!html) return error(res, "html is required", 400);
@@ -270,6 +275,11 @@ const renderHtml = async (req, res, next) => {
   // so Puppeteer never makes external network calls — no latency on subsequent requests.
   const fontsCss = await getEmbeddedFontsCss();
 
+  const isLetter     = paperSize === "letter";
+  const pageSize     = isLetter ? "216mm 279mm" : "210mm 297mm";
+  const pageWidthMm  = isLetter ? "216mm" : "210mm";
+  const pageHeightMm = isLetter ? "279mm" : "297mm";
+
   const fullHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -277,22 +287,45 @@ const renderHtml = async (req, res, next) => {
   <style>
     /* Google Fonts — embedded as base64 data-URIs (no external fetch) */
     ${fontsCss}
-    @page { size: A4 portrait; margin: 0; }
-    html, body { margin: 0; padding: 0; width: 210mm; background: white; color-scheme: light; }
+    @page { size: ${pageSize}; margin: 0; }
+    /* Base reset — must come before inlineStyles so later rules can override */
+    html, body {
+      margin: 0; padding: 0;
+      width: ${pageWidthMm};
+      background: white;
+      color-scheme: light;
+      /* Match the browser's global body styles from styles.css @apply so the resume
+         fonts and smoothing are identical in the PDF and in the live preview. */
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
     *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     .page-break-line, .page-break-label { display: none !important; }
     .preview-page-host, .shadow-card { box-shadow: none !important; }
     :root { ${cssVarsCss} }
     ${inlineStyles}
-    /* Full-bleed header fix: every template that uses -mx-[16mm] -mt-[14mm] Tailwind
-       classes to bleed the header to A4 edges needs an explicit override so Puppeteer
-       produces the same result as the browser editor preview. */
-    .modern-header, .bold-header, .creative-header, .elegant-header, .tech-header {
-      width: 210mm !important;
-      margin-left: -16mm !important;
-      margin-right: -16mm !important;
-      margin-top: -14mm !important;
+    /* ── Layout guard ─────────────────────────────────────────────────────────
+       Chromium's page.pdf() may activate print media internally even when
+       emulateMediaType("screen") is set.  These rules run AFTER inlineStyles so
+       they override any @media print { .resume-page { padding:0 } } resets that
+       would otherwise collapse the A4/Letter layout to zero padding.
+       Important: both the plain rule AND an @media print repeat are needed —
+       the plain rule wins on specificity when media is "screen", the print rule
+       wins when Chromium internally switches to "print" for pdf().            */
+    .resume-page {
+      padding: 14mm 16mm !important;
+      width: ${pageWidthMm} !important;
+      min-height: ${pageHeightMm} !important;
       box-sizing: border-box !important;
+    }
+    @media print {
+      .resume-page {
+        padding: 14mm 16mm !important;
+        width: ${pageWidthMm} !important;
+        min-height: ${pageHeightMm} !important;
+        box-sizing: border-box !important;
+      }
     }
     ${watermarkCss}
   </style>
@@ -309,7 +342,12 @@ const renderHtml = async (req, res, next) => {
     const browser = await getBrowser();
     page = await browser.newPage();
 
-    await page.setViewport({ width: 794, height: 1123, deviceScaleFactor: 1 });
+    // Width = A4/Letter in pixels at 96 dpi (210mm → 794 px, 216mm → 816 px).
+    // Height is set tall enough for a 5-page resume so Chromium never clips content
+    // during layout. page.pdf() re-paginates independently of viewport height.
+    const viewportWidth  = isLetter ? 816 : 794;
+    const viewportHeight = 5000;
+    await page.setViewport({ width: viewportWidth, height: viewportHeight, deviceScaleFactor: 1 });
     // Use screen media so @media print rules don't strip template padding.
     await page.emulateMediaType("screen");
 
@@ -319,12 +357,13 @@ const renderHtml = async (req, res, next) => {
 
     // Wait for the font-face descriptors to parse and apply.
     await page.evaluate(() => document.fonts.ready);
-    // Layout-stabilisation buffer. Matched to the 500 ms the frontend waits before
-    // capturing outerHTML, so Puppeteer and the browser see the same render state.
-    await new Promise(r => setTimeout(r, 500));
+    // Layout-stabilisation buffer: wait for Angular/CSS layout to settle.
+    // 800 ms matches the frontend's own 500 ms wait plus a safety margin so that
+    // Puppeteer and the browser always observe the same final render state.
+    await new Promise(r => setTimeout(r, 800));
 
     const rawPdf = await page.pdf({
-      format:          "A4",
+      format:          isLetter ? "Letter" : "A4",
       printBackground: true,
       margin:          { top: 0, right: 0, bottom: 0, left: 0 },
     });

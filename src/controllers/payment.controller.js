@@ -7,10 +7,10 @@ const logger = require("../utils/logger");
 
 const PREMIUM_TEMPLATE_IDS = [
   "ats-professional", "modern-professional", "tech",
-  "sidebar-pro", "banner-dark", "timeline-pro", "corporate-pro",
-  "executive-elite", "luxury-gold", "creative-portfolio-pro",
-  "startup-founder", "product-manager-pro",
+  "executive-elite", "creative-portfolio-pro",
+  "startup-founder",
   "photo-government", "photo-executive",
+  "sales-achiever",
 ];
 const TEMPLATE_PRICE_PAISE = 2900; // ₹29 in paise
 
