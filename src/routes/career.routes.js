@@ -13,8 +13,5 @@ router.post("/jobs",                   career.createJob);
 router.patch("/jobs/:id",              career.updateJob);
 router.delete("/jobs/:id",             career.deleteJob);
 router.post("/jobs/:id/timeline",      career.addTimeline);
-router.get("/portfolio",               career.getPortfolio);
-router.put("/portfolio",               career.upsertPortfolio);
-router.get("/portfolio/check-username/:username", career.checkUsername);
 
 module.exports = router;

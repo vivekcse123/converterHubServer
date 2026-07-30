@@ -12,6 +12,13 @@ const OUTPUT_DIR = path.join(
   "../..",
   process.env.OUTPUT_DIR || "outputs",
 );
+// Persistent (not temp-swept) storage for portfolio hero/project images — distinct from
+// UPLOAD_DIR, which is periodically cleaned as part of the file-conversion pipeline.
+const PORTFOLIO_MEDIA_DIR = path.join(
+  __dirname,
+  "../..",
+  process.env.PORTFOLIO_MEDIA_DIR || "portfolio-media",
+);
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE, 10) || 104_857_600; // 100 MB
 const FILE_EXPIRY_HOURS = parseInt(process.env.FILE_EXPIRY_HOURS, 10) || 2;
 
@@ -157,6 +164,7 @@ const SUBSCRIPTION_PLANS = {
 const ensureDirectories = async () => {
   await fse.ensureDir(UPLOAD_DIR);
   await fse.ensureDir(OUTPUT_DIR);
+  await fse.ensureDir(PORTFOLIO_MEDIA_DIR);
   await fse.ensureDir("logs");
   await fse.ensureDir(path.join(UPLOAD_DIR, "temp"));
 };
@@ -164,6 +172,7 @@ const ensureDirectories = async () => {
 module.exports = {
   UPLOAD_DIR,
   OUTPUT_DIR,
+  PORTFOLIO_MEDIA_DIR,
   MAX_FILE_SIZE,
   FILE_EXPIRY_HOURS,
   ALLOWED_MIME_TYPES,

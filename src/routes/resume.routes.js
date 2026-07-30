@@ -2,7 +2,7 @@
 const express    = require("express");
 const rateLimit  = require("express-rate-limit");
 const { protect: authenticate } = require("../middleware/auth.middleware");
-const { generatePdf, renderHtml } = require("../controllers/resume.controller");
+const { generatePdf, generateDocx, renderHtml } = require("../controllers/resume.controller");
 
 const router = express.Router();
 
@@ -21,5 +21,8 @@ router.post("/pdf", authenticate, pdfRateLimit, generatePdf);
 
 // POST /api/resume/render-html — Puppeteer pixel-perfect PDF from live DOM
 router.post("/render-html", authenticate, pdfRateLimit, renderHtml);
+
+// POST /api/resume/docx — Word (.docx) export built from structured resume data
+router.post("/docx", authenticate, pdfRateLimit, generateDocx);
 
 module.exports = router;

@@ -26,9 +26,19 @@ const razorpayWebhook = async (req, res) => {
       return res.status(400).json({ ok: false });
     }
 
+    // Verify against the exact bytes Razorpay sent (captured by app.js's
+    // json-parser `verify` hook for this route) — NOT `JSON.stringify(req.body)`,
+    // which re-serializes the already-parsed object and can differ from the
+    // original payload (key order, whitespace, number formatting), causing
+    // genuine webhooks to fail signature checks. Fail closed if it's missing.
+    if (!req.rawBody) {
+      logger.error("Razorpay webhook: raw body unavailable — rejecting (cannot verify signature)");
+      return res.status(400).json({ ok: false });
+    }
+
     const expected = crypto
       .createHmac("sha256", secret)
-      .update(JSON.stringify(req.body))
+      .update(req.rawBody)
       .digest("hex");
 
     if (expected !== signature) {

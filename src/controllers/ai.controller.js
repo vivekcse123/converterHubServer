@@ -208,6 +208,20 @@ const coverLetter = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// POST /api/ai/resume/transform — grammar/tone/length/translate rewrite of a text snippet
+const transformText = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { mode, text, targetLanguage } = req.body;
+    if (!mode) return error(res, "mode is required", 400);
+    if (!text || !text.trim()) return error(res, "text is required", 400);
+    const result = await aiService.transformResumeText({ mode, text, targetLanguage });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Text transformed");
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   summarizePdf,
   chatWithPdf,
@@ -216,4 +230,5 @@ module.exports = {
   extractFormData,
   resumeBullets,
   coverLetter,
+  transformText,
 };

@@ -151,6 +151,25 @@ Use formal but warm tone. Do NOT use placeholders like [Your Name]. Write it as 
   return { letter: letter.trim() };
 };
 
+// ── Resume Text Transform (AI dock: grammar/tone/length/translate) ──────────
+const TRANSFORM_PROMPTS = {
+  grammar: (text) => `You are a professional resume editor. Fix all grammar, spelling, and punctuation errors in the following resume text. Keep the meaning, facts, and tone unchanged.\n\nText:\n${text}\n\nReturn ONLY the corrected text. No explanation, no markdown, no quotes.`,
+  deepcheck: (text) => `You are a senior resume reviewer. Perform a deep pass on the following resume text: fix grammar, tighten wording, improve clarity, strengthen weak verbs, and make it more ATS-friendly. Keep it factually the same.\n\nText:\n${text}\n\nReturn ONLY the improved text. No explanation, no markdown, no quotes.`,
+  professional: (text) => `You are an expert resume writer. Rewrite the following resume text in a polished, professional tone suitable for corporate job applications. Keep the facts unchanged.\n\nText:\n${text}\n\nReturn ONLY the rewritten text. No explanation, no markdown, no quotes.`,
+  executive: (text) => `You are an executive resume writer. Rewrite the following resume text in a confident, strategic, leadership-oriented tone suitable for senior/C-level roles. Keep the facts unchanged.\n\nText:\n${text}\n\nReturn ONLY the rewritten text. No explanation, no markdown, no quotes.`,
+  shorten: (text) => `You are a resume editor. Rewrite the following resume text to be significantly more concise — cut at least a third of the words — while keeping every key fact and metric.\n\nText:\n${text}\n\nReturn ONLY the shortened text. No explanation, no markdown, no quotes.`,
+  expand: (text) => `You are a resume writer. Expand the following resume text with more specific, realistic detail — scope, tools, metrics, outcomes — while staying truthful to what's given and professional in tone.\n\nText:\n${text}\n\nReturn ONLY the expanded text. No explanation, no markdown, no quotes.`,
+  translate: (text, targetLanguage) => `You are a professional translator specializing in resumes. Translate the following resume text into ${targetLanguage || "Hindi"}, preserving professional tone and formatting.\n\nText:\n${text}\n\nReturn ONLY the translated text. No explanation, no markdown, no quotes.`,
+};
+
+const transformResumeText = async ({ mode, text, targetLanguage }) => {
+  const builder = TRANSFORM_PROMPTS[mode];
+  if (!builder) throw new Error(`Unsupported transform mode: ${mode}`);
+  const prompt = builder(text.slice(0, 3000), targetLanguage);
+  const result = (await ask(prompt)).trim();
+  return { result };
+};
+
 module.exports = {
   summarizePdf,
   chatWithPdf,
@@ -158,4 +177,5 @@ module.exports = {
   extractFormData,
   generateResumeBullets,
   generateCoverLetter,
+  transformResumeText,
 };

@@ -1,5 +1,6 @@
 "use strict";
 const { generatePdfBuffer, PREMIUM_TEMPLATE_IDS } = require("../services/resume-pdf.service");
+const { generateDocxBuffer } = require("../services/resume-docx.service");
 const ResumeDownloadLog = require("../models/ResumeDownloadLog");
 const { error } = require("../utils/response");
 const logger = require("../utils/logger");
@@ -199,6 +200,52 @@ const generatePdf = async (req, res) => {
   return res.send(pdfBuffer);
 };
 
+// POST /api/resume/docx — Word (.docx) export built from the resume's structured
+// data (not the visual template) — the standard "plain, ATS-friendly Word copy"
+// most resume builders offer alongside a pixel-perfect PDF.
+const generateDocx = async (req, res) => {
+  const { resume, templateId, resumeName } = req.body;
+  if (!resume) return error(res, "resume is required", 400);
+
+  const userIsPro     = isPro(req.user);
+  const isPremiumTmpl = PREMIUM_TEMPLATE_IDS.includes(templateId);
+  const planType      = getUserPlanType(req.user);
+  const ip            = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || "";
+  const userAgent     = req.headers["user-agent"] || "";
+
+  const templatePurchased = hasPurchasedTemplate(req.user, templateId);
+  if (isPremiumTmpl && !userIsPro && !templatePurchased) {
+    await ResumeDownloadLog.create({
+      userId: req.user._id, templateId, templateName: TEMPLATE_NAMES[templateId] || templateId,
+      isPremiumTemplate: true, planType, action: "blocked", success: false, blocked: true,
+      reason: "Premium template requires Pro subscription", ip, userAgent,
+      resumeName: resumeName || "Untitled",
+    }).catch(() => {});
+    return error(res, "This template requires a Pro subscription. Upgrade at /resume-builder/pricing.", 403);
+  }
+
+  let docxBuffer;
+  try {
+    docxBuffer = await generateDocxBuffer(resume, templateId);
+  } catch (err) {
+    logger.error("DOCX generation error:", err);
+    return error(res, "Word export failed. Please try again.", 500);
+  }
+
+  await ResumeDownloadLog.create({
+    userId: req.user._id, templateId, templateName: TEMPLATE_NAMES[templateId] || templateId,
+    isPremiumTemplate: isPremiumTmpl, planType, action: "download", success: true, blocked: false,
+    ip, userAgent, resumeName: resumeName || "Untitled",
+  }).catch(() => {});
+
+  const filename = `${(resumeName || "resume").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.docx`;
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Length", docxBuffer.length);
+  res.setHeader("Cache-Control", "no-store");
+  return res.send(docxBuffer);
+};
+
 /**
  * GET /api/admin/resume-logs
  * Returns paginated download logs for admin audit.
@@ -279,6 +326,25 @@ const renderHtml = async (req, res, next) => {
   const pageSize     = isLetter ? "216mm 279mm" : "210mm 297mm";
   const pageWidthMm  = isLetter ? "216mm" : "210mm";
   const pageHeightMm = isLetter ? "279mm" : "297mm";
+  // Single source of truth for the resume's visual margin. Must match
+  // `.resume-page { padding: 14mm 16mm }` in
+  // frontend/.../resume-builder/templates/shared/print.css — that padding is
+  // what the on-screen preview uses (a single continuously-flowing box), but
+  // here it is applied as a Puppeteer page.pdf() `margin` instead of CSS
+  // padding. Chromium's print engine does NOT repeat a box's own padding on
+  // every physical page it fragments across — only at the true top/bottom of
+  // the box — so a 3+ page resume using CSS padding for its margin would get
+  // full margin on page 1, zero top/bottom margin on interior pages, and a
+  // ragged last page. The `margin` option below is applied by Chromium's
+  // print-to-PDF machinery to every physical page consistently, which is the
+  // only reliable way to get uniform margins across a multi-page export.
+  const marginTopBottomMm = "14mm";
+  const marginLeftRightMm = "16mm";
+  // The printable content area (page width minus the left/right margin that
+  // page.pdf() applies) — .resume-page renders at this width both here and in
+  // the Puppeteer viewport set below, so on-screen layout and the printed
+  // output wrap text and position elements identically.
+  const contentWidthMm = `${parseFloat(pageWidthMm) - 2 * parseFloat(marginLeftRightMm)}mm`;
 
   const fullHtml = `<!DOCTYPE html>
 <html>
@@ -291,7 +357,7 @@ const renderHtml = async (req, res, next) => {
     /* Base reset — must come before inlineStyles so later rules can override */
     html, body {
       margin: 0; padding: 0;
-      width: ${pageWidthMm};
+      width: ${contentWidthMm};
       background: white;
       color-scheme: light;
       /* Match the browser's global body styles from styles.css @apply so the resume
@@ -308,22 +374,25 @@ const renderHtml = async (req, res, next) => {
     /* ── Layout guard ─────────────────────────────────────────────────────────
        Chromium's page.pdf() may activate print media internally even when
        emulateMediaType("screen") is set.  These rules run AFTER inlineStyles so
-       they override any @media print { .resume-page { padding:0 } } resets that
-       would otherwise collapse the A4/Letter layout to zero padding.
+       they override any @media print { .resume-page { ... } } resets that would
+       otherwise conflict with the layout below.
        Important: both the plain rule AND an @media print repeat are needed —
        the plain rule wins on specificity when media is "screen", the print rule
-       wins when Chromium internally switches to "print" for pdf().            */
+       wins when Chromium internally switches to "print" for pdf().
+       Padding is intentionally zeroed here: the visual margin is supplied by
+       the page.pdf({ margin }) option below instead of CSS padding, so it
+       repeats correctly on every physical page (see marginTopBottomMm above). */
     .resume-page {
-      padding: 14mm 16mm !important;
-      width: ${pageWidthMm} !important;
-      min-height: ${pageHeightMm} !important;
+      padding: 0 !important;
+      width: 100% !important;
+      min-height: 0 !important;
       box-sizing: border-box !important;
     }
     @media print {
       .resume-page {
-        padding: 14mm 16mm !important;
-        width: ${pageWidthMm} !important;
-        min-height: ${pageHeightMm} !important;
+        padding: 0 !important;
+        width: 100% !important;
+        min-height: 0 !important;
         box-sizing: border-box !important;
       }
     }
@@ -342,10 +411,12 @@ const renderHtml = async (req, res, next) => {
     const browser = await getBrowser();
     page = await browser.newPage();
 
-    // Width = A4/Letter in pixels at 96 dpi (210mm → 794 px, 216mm → 816 px).
+    // Viewport width matches contentWidthMm (96 dpi) so .resume-page — now
+    // `width: 100%` of the content-width <body> above — lays out at the same
+    // width here as it will occupy in the printed output.
+    const viewportWidth  = Math.round(parseFloat(contentWidthMm) * (96 / 25.4));
     // Height is set tall enough for a 5-page resume so Chromium never clips content
     // during layout. page.pdf() re-paginates independently of viewport height.
-    const viewportWidth  = isLetter ? 816 : 794;
     const viewportHeight = 5000;
     await page.setViewport({ width: viewportWidth, height: viewportHeight, deviceScaleFactor: 1 });
     // Use screen media so @media print rules don't strip template padding.
@@ -357,15 +428,27 @@ const renderHtml = async (req, res, next) => {
 
     // Wait for the font-face descriptors to parse and apply.
     await page.evaluate(() => document.fonts.ready);
-    // Layout-stabilisation buffer: wait for Angular/CSS layout to settle.
-    // 800 ms matches the frontend's own 500 ms wait plus a safety margin so that
-    // Puppeteer and the browser always observe the same final render state.
-    await new Promise(r => setTimeout(r, 800));
+    // Wait for actual layout readiness instead of a blind delay: every <img>
+    // either finishes loading (or errors out) and two animation frames elapse
+    // afterward so the browser has committed a real layout + paint. Capped at
+    // 4s so a stalled image request can never hang the export.
+    await page.evaluate(() => new Promise((resolve) => {
+      const settle = () => requestAnimationFrame(() => requestAnimationFrame(resolve));
+      const images = Array.from(document.images).filter((img) => !img.complete);
+      if (!images.length) { settle(); return; }
+      let remaining = images.length;
+      const onOne = () => { if (--remaining <= 0) settle(); };
+      images.forEach((img) => {
+        img.addEventListener("load", onOne, { once: true });
+        img.addEventListener("error", onOne, { once: true });
+      });
+      setTimeout(settle, 4000);
+    }));
 
     const rawPdf = await page.pdf({
       format:          isLetter ? "Letter" : "A4",
       printBackground: true,
-      margin:          { top: 0, right: 0, bottom: 0, left: 0 },
+      margin:          { top: marginTopBottomMm, bottom: marginTopBottomMm, left: marginLeftRightMm, right: marginLeftRightMm },
     });
 
     // Newer Puppeteer versions return Uint8Array instead of Buffer.
@@ -399,4 +482,4 @@ const renderHtml = async (req, res, next) => {
   }
 };
 
-module.exports = { generatePdf, getDownloadLogs, renderHtml, warmup };
+module.exports = { generatePdf, generateDocx, getDownloadLogs, renderHtml, warmup };

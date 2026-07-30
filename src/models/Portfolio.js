@@ -50,6 +50,38 @@ const portfolioSchema = new mongoose.Schema(
     metaDescription: { type: String, trim: true, maxlength: 300 },
 
     views: { type: Number, default: 0 },
+
+    // ── Section-based builder (v2) ──────────────────────────────────────────
+    // Ordered, typed sections. `config` is intentionally untyped (Mixed) so new
+    // section types/fields can be added later without a schema migration.
+    sections: [
+      {
+        _id:     false,
+        id:      { type: String, required: true },
+        type:    { type: String, required: true, enum: ["hero", "about", "skills", "experience", "projects", "education", "testimonials", "contact"] },
+        enabled: { type: Boolean, default: true },
+        // Redundant with array position (the frontend doesn't send this) — stamped
+        // server-side in the controller from array index before every save.
+        order:   { type: Number, default: 0 },
+        config:  { type: mongoose.Schema.Types.Mixed, default: {} },
+      },
+    ],
+
+    theme: {
+      templateId:  { type: String, default: "minimal" },
+      accentColor: { type: String, default: "#4f46e5" },
+      fontFamily:  { type: String, enum: ["inter", "poppins", "georgia", "jetbrains-mono"], default: "inter" },
+      mode:        { type: String, enum: ["light", "dark"], default: "dark" },
+      layoutWidth: { type: String, enum: ["narrow", "wide"], default: "wide" },
+      radius:      { type: String, enum: ["sharp", "rounded", "pill"], default: "rounded" },
+    },
+
+    // draft vs published: owner always edits `draft`; the public page always
+    // reads `published`. Publishing is a one-way copy from draft -> published.
+    status:      { type: String, enum: ["draft", "published"], default: "draft" },
+    draft:       { type: mongoose.Schema.Types.Mixed },
+    published:   { type: mongoose.Schema.Types.Mixed },
+    publishedAt: { type: Date },
   },
   { timestamps: true }
 );

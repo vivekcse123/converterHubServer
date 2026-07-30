@@ -26,6 +26,7 @@ const careerRoutes       = require("./routes/career.routes");
 const shareRoutes        = require("./routes/share.routes");
 const publicRoutes       = require("./routes/public.routes");
 const resumeRoutes       = require("./routes/resume.routes");
+const portfolioRoutes    = require("./routes/portfolio.routes");
 const logger = require("./utils/logger");
 
 const app = express();
@@ -139,11 +140,34 @@ app.use((req, _res, next) => {
   let limit = "1mb";
   if (req.path === "/api/resume/render-html") limit = "5mb";
   else if (req.path.startsWith("/api/resume")) limit = "2mb";
-  express.json({ limit })(req, _res, next);
+
+  const opts = { limit };
+  // The Razorpay webhook HMAC must be verified against the exact bytes
+  // Razorpay sent, not `JSON.stringify(req.body)` — re-serializing the
+  // already-parsed object can differ from the original payload (key order,
+  // whitespace, number formatting), causing genuine webhooks to fail
+  // signature checks. Stash the raw buffer here, before parsing discards it.
+  if (req.path === "/api/webhooks/razorpay") {
+    opts.verify = (verifyReq, _verifyRes, buf) => { verifyReq.rawBody = buf; };
+  }
+  express.json(opts)(req, _res, next);
 });
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // ── Logging ───────────────────────────────────────────────────────────────────
+// /outputs downloads accept a JWT via `?token=` (see below) for contexts that
+// can't set an Authorization header (e.g. a plain <a href> or <img src>).
+// Overriding morgan's built-in `:url` token here redacts that value so
+// bearer tokens never land in combined.log — applies to every route using
+// the "combined" format, not just /outputs, in case any future route adds a
+// similar query-string-credential pattern.
+morgan.token("url", (req) => {
+  if (!req.originalUrl.includes("token=")) return req.originalUrl;
+  const [pathPart, query] = req.originalUrl.split("?");
+  const params = new URLSearchParams(query);
+  if (params.has("token")) params.set("token", "REDACTED");
+  return `${pathPart}?${params.toString()}`;
+});
 app.use(
   morgan("combined", {
     stream: { write: (msg) => logger.http(msg.trim()) },
@@ -177,6 +201,18 @@ app.use(
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    },
+  }),
+);
+
+// Portfolio hero/project images — public read (unlike /outputs above), long-cache since
+// filenames are content-addressed UUIDs written once by the portfolio image upload endpoint.
+app.use(
+  "/portfolio-media",
+  express.static(path.join(__dirname, "..", "portfolio-media"), {
+    setHeaders: (res) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     },
   }),
 );
@@ -243,6 +279,7 @@ app.use("/api/career",        careerRoutes);
 app.use("/api/share",         shareRoutes);
 app.use("/api/public",        publicRoutes);
 app.use("/api/resume",        resumeRoutes);
+app.use("/api/portfolio",     portfolioRoutes);
 
 // ── Error Handlers ────────────────────────────────────────────────────────────
 app.use(notFoundHandler);

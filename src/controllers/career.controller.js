@@ -1,6 +1,5 @@
 "use strict";
 const JobApplication = require("../models/JobApplication");
-const Portfolio      = require("../models/Portfolio");
 const { success, error, paginated } = require("../utils/response");
 
 // ── Job Tracker ───────────────────────────────────────────────────────────────
@@ -81,57 +80,6 @@ const addTimeline = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// ── Portfolio ─────────────────────────────────────────────────────────────────
-
-// GET /api/career/portfolio  (own)
-const getPortfolio = async (req, res, next) => {
-  try {
-    const portfolio = await Portfolio.findOne({ userId: req.user._id }).lean();
-    success(res, { portfolio });
-  } catch (err) { next(err); }
-};
-
-// PUT /api/career/portfolio  (create or update)
-const upsertPortfolio = async (req, res, next) => {
-  try {
-    const { username } = req.body;
-    if (username) {
-      const existing = await Portfolio.findOne({ username, userId: { $ne: req.user._id } });
-      if (existing) return error(res, "Username already taken", 409);
-    }
-    // Normalize skill levels to lowercase to match enum
-    const body = { ...req.body, userId: req.user._id };
-    if (Array.isArray(body.skills)) {
-      body.skills = body.skills.map(s => ({ ...s, level: (s.level || 'intermediate').toLowerCase() }));
-    }
-    const portfolio = await Portfolio.findOneAndUpdate(
-      { userId: req.user._id },
-      body,
-      { new: true, upsert: true, runValidators: true }
-    );
-    success(res, { portfolio });
-  } catch (err) { next(err); }
-};
-
-// GET /api/career/portfolio/check-username/:username  (public)
-const checkUsername = async (req, res, next) => {
-  try {
-    const taken = !!(await Portfolio.findOne({ username: req.params.username }));
-    success(res, { username: req.params.username, available: !taken });
-  } catch (err) { next(err); }
-};
-
-// GET /api/public/portfolio/:username  (public, no auth)
-const getPublicPortfolio = async (req, res, next) => {
-  try {
-    const portfolio = await Portfolio.findOne({ username: req.params.username, isPublic: true }).lean();
-    if (!portfolio) return error(res, "Portfolio not found", 404);
-    // Increment views
-    Portfolio.findByIdAndUpdate(portfolio._id, { $inc: { views: 1 } }).catch(() => {});
-    success(res, { portfolio });
-  } catch (err) { next(err); }
-};
-
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 // GET /api/career/stats
@@ -149,4 +97,4 @@ const getCareerStats = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { getJobs, createJob, updateJob, deleteJob, addTimeline, getPortfolio, upsertPortfolio, checkUsername, getPublicPortfolio, getCareerStats };
+module.exports = { getJobs, createJob, updateJob, deleteJob, addTimeline, getCareerStats };

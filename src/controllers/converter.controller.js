@@ -15,6 +15,8 @@ const advancedPdf = require("../services/advanced-pdf.service");
 const extConverters = require("../services/extended-converters.service");
 const ocrService = require("../services/ocr.service");
 const storageService = require("../services/storage.service");
+const queueService = require("../services/queue.service");
+const Job = require("../models/Job");
 const ConversionHistory = require("../models/ConversionHistory");
 const User = require("../models/User");
 const { deleteFile } = require("../utils/fileCleanup");
@@ -66,6 +68,66 @@ const buildDownloadUrl = (req, fileName) => {
 
 const cleanup = (filePath) => deleteFile(filePath);
 
+// Tools `src/workers/conversion.worker.js` knows how to process (its switch
+// statement covers exactly this set). Routing these through the queue keeps
+// CPU/IO-heavy work — OCR, Puppeteer HTML rendering, PDF rasterization — off
+// the Express event loop instead of blocking a request thread for the full
+// duration of the conversion.
+const QUEUEABLE_TOOLS = new Set([
+  "pdf-to-jpg", "watermark-pdf", "redact-pdf", "page-numbers", "pdf-to-pdfa",
+  "pdf-to-txt", "pdf-to-markdown", "pdf-to-json", "pdf-to-csv", "pdf-to-epub",
+  "pdf-to-pptx", "pdf-to-excel", "heic-to-jpg", "gif-to-pdf", "csv-to-pdf",
+  "html-to-pdf", "ocr",
+]);
+
+// Comfortably under the 5-minute global request timeout (see app.js) so a
+// stalled/never-consumed job fails fast with a clear fallback instead of
+// hanging the request until Express kills the connection.
+const QUEUE_WAIT_TIMEOUT_MS = 4 * 60 * 1000;
+
+/**
+ * Attempts to run a single-file conversion on the BullMQ worker instead of
+ * inline in this request. Returns the worker's result (identical shape to
+ * calling the service function directly — the worker calls the same
+ * services with the same arguments) on success, or `null` if the caller
+ * should fall back to running the conversion inline: the tool isn't
+ * queueable, Redis/the queue isn't available, or the queued attempt
+ * errored or timed out (e.g. no worker process is actually consuming jobs).
+ * This makes the "falls back to sync if the queue isn't available" behavior
+ * actually true in every failure mode, not just when Redis is down.
+ *
+ * NOTE: assumes the worker process shares the same uploads/outputs
+ * filesystem as this API process (true for the current single-container
+ * deployment). If the worker is ever deployed as a separate service without
+ * shared storage, this needs to move to shared/object storage first.
+ */
+const tryQueued = async (req, tool, inputPath, options) => {
+  if (!QUEUEABLE_TOOLS.has(tool) || !queueService.isAvailable) return null;
+  try {
+    const dbJob = await Job.create({
+      user: req.user?._id,
+      sessionId: req.headers["x-session-id"],
+      tool,
+      status: "queued",
+      inputFiles: [{ path: inputPath }],
+      options,
+      ipAddress: req.ip,
+      userAgent: req.headers["user-agent"],
+    });
+    const bullJob = await queueService.addJob(tool, {
+      jobDbId: dbJob._id.toString(),
+      userId: req.user?._id?.toString(),
+      inputPaths: [inputPath],
+      options,
+    });
+    if (!bullJob) return null;
+    return await bullJob.waitUntilFinished(queueService.getQueueEvents(), QUEUE_WAIT_TIMEOUT_MS);
+  } catch (err) {
+    logger.warn(`Queued "${tool}" job failed (${err.message}) — falling back to inline processing`);
+    return null;
+  }
+};
+
 /**
  * Verify the output file exists and has content.
  * Throws a descriptive error if missing or empty.
@@ -95,7 +157,8 @@ const withSingle = (fn, tool) => async (req, res, next) => {
   try {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No file uploaded", 400);
-    const result = await fn(req.file.path, req.body);
+    const result = (await tryQueued(req, tool, req.file.path, req.body))
+      ?? await fn(req.file.path, req.body);
 
     await verifyOutput(result.outputPath);
 
@@ -523,10 +586,9 @@ const performOcr = async (req, res, next) => {
     await handleSingleUpload(req, res);
     if (!req.file) return error(res, "No file uploaded", 400);
     const { lang = "eng", outputFormat = "pdf" } = req.body;
-    const result = await ocrService.performOCR(req.file.path, {
-      lang,
-      outputFormat,
-    });
+    const options = { lang, outputFormat };
+    const result = (await tryQueued(req, "ocr", req.file.path, options))
+      ?? await ocrService.performOCR(req.file.path, options);
     await verifyOutput(result.outputPath);
     cleanup(req.file.path);
     logConversion(

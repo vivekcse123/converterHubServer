@@ -24,5 +24,6 @@ router.post("/extract-keywords",    ai.extractKeywords);
 router.post("/form-fill",           ai.extractFormData);
 router.post("/resume/bullets",      ai.resumeBullets);
 router.post("/resume/cover-letter", ai.coverLetter);
+router.post("/resume/transform",    ai.transformText);
 
 module.exports = router;
