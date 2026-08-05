@@ -296,6 +296,12 @@ const renderHtml = async (req, res, next) => {
     filename     = "resume",
     templateId   = "",
     paperSize    = "a4",
+    // True for full-bleed-header / two-column templates that supply their own
+    // internal mm-based margin (see the frontend's `selfMargined` detection in
+    // resume-pdf.service.ts) — these must get zero *additional* page margin here,
+    // or their internal padding and this page-level margin stack, pushing a
+    // full-bleed header inward from the true page edge.
+    selfMargined = false,
   } = req.body;
 
   if (!html) return error(res, "html is required", 400);
@@ -338,13 +344,23 @@ const renderHtml = async (req, res, next) => {
   // ragged last page. The `margin` option below is applied by Chromium's
   // print-to-PDF machinery to every physical page consistently, which is the
   // only reliable way to get uniform margins across a multi-page export.
-  const marginTopBottomMm = "14mm";
-  const marginLeftRightMm = "16mm";
+  //
+  // Self-margined templates (full-bleed headers, two-column sidebars) are the
+  // exception: they already reproduce this exact margin themselves via CSS
+  // padding on their own inner elements, specifically so a header can bleed to
+  // the true page edge. Applying the standard 14mm/16mm page margin on top of
+  // that would double the margin and pull the "full-bleed" header back in from
+  // the edge — so for these, the page margin must be zero and the printable
+  // width must be the *full* page width (not page width minus margin).
+  const marginTopBottomMm = selfMargined ? "0mm" : "14mm";
+  const marginLeftRightMm = selfMargined ? "0mm" : "16mm";
   // The printable content area (page width minus the left/right margin that
   // page.pdf() applies) — .resume-page renders at this width both here and in
   // the Puppeteer viewport set below, so on-screen layout and the printed
   // output wrap text and position elements identically.
-  const contentWidthMm = `${parseFloat(pageWidthMm) - 2 * parseFloat(marginLeftRightMm)}mm`;
+  const contentWidthMm = selfMargined
+    ? pageWidthMm
+    : `${parseFloat(pageWidthMm) - 2 * parseFloat(marginLeftRightMm)}mm`;
 
   const fullHtml = `<!DOCTYPE html>
 <html>

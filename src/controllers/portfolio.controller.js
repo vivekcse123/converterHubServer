@@ -126,6 +126,41 @@ const uploadImage = async (req, res, next) => {
   }
 };
 
+// GET /api/portfolio/media  (list previously uploaded images for reuse in the media panel)
+const listMedia = async (req, res, next) => {
+  try {
+    const userDir = path.join(PORTFOLIO_MEDIA_DIR, String(req.user._id));
+    if (!(await fse.pathExists(userDir))) return success(res, { media: [] });
+
+    const filenames = await fse.readdir(userDir);
+    const media = await Promise.all(
+      filenames
+        .filter((f) => f.endsWith(".webp"))
+        .map(async (filename) => {
+          const stat = await fse.stat(path.join(userDir, filename));
+          return { url: `/portfolio-media/${req.user._id}/${filename}`, filename, uploadedAt: stat.mtime };
+        })
+    );
+    media.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+    success(res, { media });
+  } catch (err) { next(err); }
+};
+
+// DELETE /api/portfolio/media/:filename
+const deleteMedia = async (req, res, next) => {
+  try {
+    const { filename } = req.params;
+    // Reject anything that isn't a bare filename — blocks path traversal (../, /, etc.)
+    if (!filename || filename !== path.basename(filename)) {
+      return error(res, "Invalid filename", 400);
+    }
+    const filePath = path.join(PORTFOLIO_MEDIA_DIR, String(req.user._id), filename);
+    if (!(await fse.pathExists(filePath))) return error(res, "File not found", 404);
+    await fse.remove(filePath);
+    success(res, {}, "Image deleted");
+  } catch (err) { next(err); }
+};
+
 // GET /api/portfolio/check-username/:username  (public availability check)
 const checkUsername = async (req, res, next) => {
   try {
@@ -137,11 +172,13 @@ const checkUsername = async (req, res, next) => {
 // GET /api/public/portfolio/:username  (public, no auth — reads `published` only)
 const getPublicPortfolio = async (req, res, next) => {
   try {
-    const portfolio = await Portfolio.findOne({ username: req.params.username, isPublic: true }).lean();
+    const portfolio = await Portfolio.findOne({
+      username: req.params.username, isPublic: true, isHidden: { $ne: true }, deletedAt: null,
+    }).lean();
     if (!portfolio) return error(res, "Portfolio not found", 404);
     Portfolio.findByIdAndUpdate(portfolio._id, { $inc: { views: 1 } }).catch(() => {});
     success(res, { portfolio: withPublished(portfolio) });
   } catch (err) { next(err); }
 };
 
-module.exports = { getOwnPortfolio, saveDraft, publish, unpublish, uploadImage, checkUsername, getPublicPortfolio };
+module.exports = { getOwnPortfolio, saveDraft, publish, unpublish, uploadImage, listMedia, deleteMedia, checkUsername, getPublicPortfolio };

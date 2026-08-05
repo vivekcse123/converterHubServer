@@ -27,10 +27,12 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
 
-    // Roles: user | premium | admin | superadmin
+    // Roles: user | premium | admin | superadmin | editor | support | moderator
+    // The last three are admin-panel-only roles with restricted permissions —
+    // see config/adminPermissions.js for exactly what each can do.
     role: {
       type: String,
-      enum: ["user", "premium", "admin", "superadmin"],
+      enum: ["user", "premium", "admin", "superadmin", "editor", "support", "moderator"],
       default: "user",
       index: true,
     },
@@ -72,6 +74,9 @@ const userSchema = new mongoose.Schema(
     usage: {
       conversionsToday: { type: Number, default: 0 },
       aiRequestsToday: { type: Number, default: 0 },
+      // Separate from aiRequestsToday — the ATS Resume Checker is a headline
+      // feature with its own quota, not a slice of the general AI budget.
+      atsScansToday: { type: Number, default: 0 },
       totalConversions: { type: Number, default: 0 },
       totalFilesUploaded: { type: Number, default: 0 },
       totalStorageUsed: { type: Number, default: 0 }, // bytes
@@ -89,6 +94,9 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
+    // Google OAuth linkage (unset for password-only accounts)
+    googleId: { type: String, index: { sparse: true, unique: true } },
+
     // Auth tokens
     refreshTokens: [
       { token: String, createdAt: { type: Date, default: Date.now } },
@@ -100,6 +108,11 @@ const userSchema = new mongoose.Schema(
     lastLoginAt: Date,
     lastLoginIp: String,
     loginCount: { type: Number, default: 0 },
+    // Last 20 logins (password + Google), newest last — powers the admin
+    // Users module's Sessions/device-history tab.
+    loginHistory: [
+      { ip: String, userAgent: String, at: { type: Date, default: Date.now } },
+    ],
     avatar: String,
     timezone: { type: String, default: "UTC" },
 

@@ -4,9 +4,13 @@ const ConversionHistory = require("../models/ConversionHistory");
 const Job = require("../models/Job");
 const Plan = require("../models/Plan");
 const Payment = require("../models/Payment");
+const SiteConfig = require("../models/SiteConfig");
 const { success, error, paginated } = require("../utils/response");
 const logger = require("../utils/logger");
 const queueService = require("../services/queue.service");
+const { ADMIN_PERMISSIONS } = require("../config/adminPermissions");
+const { logActivity } = require("../utils/activityLog");
+const { getRazorpay } = require("../config/razorpay");
 
 // Fields that must never appear in API responses even when using .lean()
 const SENSITIVE_FIELDS = ["password", "refreshTokens", "passwordResetToken", "passwordResetExpires"];
@@ -107,8 +111,8 @@ const updateUser = async (req, res, next) => {
     // Superadmin role can only be assigned by superadmins, not regular admins
     if (role !== undefined) {
       const allowedRoles = req.user.role === "superadmin"
-        ? ["user", "premium", "admin", "superadmin"]
-        : ["user", "premium", "admin"];
+        ? ["user", "premium", "admin", "superadmin", "editor", "support", "moderator"]
+        : ["user", "premium", "admin", "editor", "support", "moderator"];
       if (!allowedRoles.includes(role)) {
         return error(res, `You cannot assign the role '${role}'.`, 403);
       }
@@ -123,6 +127,7 @@ const updateUser = async (req, res, next) => {
       runValidators: true,
     });
     if (!user) return error(res, "User not found", 404);
+    logActivity(req, "user.update", "User", user._id, user.email, { fields: Object.keys(update) });
     success(res, { user }, "User updated");
   } catch (err) {
     next(err);
@@ -138,6 +143,7 @@ const deleteUser = async (req, res, next) => {
     if (!user) return error(res, "User not found", 404);
     // Cascade delete their history
     await ConversionHistory.deleteMany({ user: req.params.id });
+    logActivity(req, "user.delete", "User", user._id, user.email);
     success(res, {}, "User deleted");
   } catch (err) {
     next(err);
@@ -159,6 +165,7 @@ const suspendUser = async (req, res, next) => {
       { new: true },
     );
     if (!user) return error(res, "User not found", 404);
+    logActivity(req, "user.suspend", "User", user._id, user.email, { reason, hours });
     success(res, { user }, `User suspended for ${hours} hours`);
   } catch (err) {
     next(err);
@@ -178,6 +185,7 @@ const unsuspendUser = async (req, res, next) => {
       { new: true },
     );
     if (!user) return error(res, "User not found", 404);
+    logActivity(req, "user.unsuspend", "User", user._id, user.email);
     success(res, { user }, "User unsuspended");
   } catch (err) {
     next(err);
@@ -200,6 +208,7 @@ const banUser = async (req, res, next) => {
       { new: true },
     );
     if (!user) return error(res, "User not found", 404);
+    logActivity(req, "user.ban", "User", user._id, user.email, { reason });
     success(res, { user }, "User banned");
   } catch (err) {
     next(err);
@@ -219,6 +228,7 @@ const unbanUser = async (req, res, next) => {
       { new: true },
     );
     if (!user) return error(res, "User not found", 404);
+    logActivity(req, "user.unban", "User", user._id, user.email);
     success(res, { user }, "User unbanned");
   } catch (err) {
     next(err);
@@ -238,6 +248,7 @@ const resetUserUsage = async (req, res, next) => {
       { new: true },
     );
     if (!user) return error(res, "User not found", 404);
+    logActivity(req, "user.reset-usage", "User", user._id, user.email);
     success(res, { user }, "Usage reset");
   } catch (err) {
     next(err);
@@ -483,6 +494,7 @@ const updatePlan = async (req, res, next) => {
       upsert: true,
       runValidators: true,
     });
+    logActivity(req, "plan.update", "Plan", plan._id, plan.name || req.params.id, allowedUpdate);
     success(res, { plan }, "Plan updated");
   } catch (err) {
     next(err);
@@ -525,6 +537,7 @@ const grantPro = async (req, res, next) => {
     );
     if (!user) return error(res, "User not found", 404);
     logger.info(`Admin ${req.user.email} granted ${plan} pro to ${user.email}`);
+    logActivity(req, "user.grant-pro", "User", user._id, user.email, { plan, expiryDate: periodEnd });
     success(res, { user: stripSensitive(user) }, "Pro access granted");
   } catch (err) {
     next(err);
@@ -546,6 +559,7 @@ const removePro = async (req, res, next) => {
     );
     if (!user) return error(res, "User not found", 404);
     logger.info(`Admin ${req.user.email} removed pro from ${user.email}`);
+    logActivity(req, "user.remove-pro", "User", user._id, user.email);
     success(res, { user: stripSensitive(user) }, "Pro access removed");
   } catch (err) {
     next(err);
@@ -572,6 +586,7 @@ const extendSubscription = async (req, res, next) => {
     await user.save();
 
     logger.info(`Admin ${req.user.email} extended subscription for ${user.email} to ${newEnd.toISOString()}`);
+    logActivity(req, "user.extend-subscription", "User", user._id, user.email, { days, months, reason, newEnd });
     success(res, { user: stripSensitive(user.toObject()), newExpiry: newEnd }, "Subscription extended");
   } catch (err) {
     next(err);
@@ -689,7 +704,187 @@ const getTrendingConverters = async (req, res, next) => {
   }
 };
 
+// ── File Conversions (row-level browse — aggregate stats already covered by
+//    getToolStats/getDailyStats/getTrendingConverters above) ──────────────────
+
+// GET /api/admin/conversions
+const getConversions = async (req, res, next) => {
+  try {
+    const page  = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const { tool, status, userId, from, to } = req.query;
+
+    const filter = {};
+    if (tool) filter.tool = tool;
+    if (status) filter.status = status;
+    if (userId) filter.user = userId;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) filter.createdAt.$lte = new Date(to);
+    }
+
+    const [conversions, total] = await Promise.all([
+      ConversionHistory.find(filter)
+        .populate("user", "name email")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      ConversionHistory.countDocuments(filter),
+    ]);
+
+    paginated(res, conversions, total, page, limit);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/conversions/:id
+const getConversion = async (req, res, next) => {
+  try {
+    const conversion = await ConversionHistory.findById(req.params.id).populate("user", "name email").lean();
+    if (!conversion) return error(res, "Conversion not found", 404);
+    success(res, { conversion });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── Payments (row-level browse — revenue aggregates already covered by getRevenue) ──
+
+// GET /api/admin/payments
+const getPayments = async (req, res, next) => {
+  try {
+    const page  = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 25, 1), 100);
+    const { status, plan, userId, from, to } = req.query;
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (plan) filter.plan = plan;
+    if (userId) filter.userId = userId;
+    if (from || to) {
+      filter.createdAt = {};
+      if (from) filter.createdAt.$gte = new Date(from);
+      if (to) filter.createdAt.$lte = new Date(to);
+    }
+
+    const [payments, total] = await Promise.all([
+      Payment.find(filter)
+        .populate("userId", "name email")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Payment.countDocuments(filter),
+    ]);
+
+    paginated(res, payments, total, page, limit);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/payments/:id
+const getPayment = async (req, res, next) => {
+  try {
+    const payment = await Payment.findById(req.params.id).populate("userId", "name email").lean();
+    if (!payment) return error(res, "Payment not found", 404);
+    success(res, { payment });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/admin/payments/:id/refund
+const refundPayment = async (req, res, next) => {
+  try {
+    const { amount, reason } = req.body;
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) return error(res, "Payment not found", 404);
+    if (payment.status === "refunded") return error(res, "Payment already refunded", 400);
+    if (!payment.razorpayPaymentId) return error(res, "This payment has no Razorpay payment id to refund", 400);
+
+    const refundAmount = amount ? Math.round(Number(amount) * 100) : payment.amount; // rupees -> paise if partial
+
+    let razorpayRefund;
+    try {
+      razorpayRefund = await getRazorpay().payments.refund(payment.razorpayPaymentId, {
+        amount: refundAmount,
+        notes: { reason: reason || "Refunded by admin", refundedBy: req.user.email },
+      });
+    } catch (razorpayErr) {
+      logger.error(`Razorpay refund failed for payment ${payment._id}: ${razorpayErr.message}`);
+      return error(res, `Razorpay refund failed: ${razorpayErr.message}`, 502);
+    }
+
+    payment.status = "refunded";
+    payment.refund = {
+      amount: refundAmount,
+      reason: reason || "",
+      refundedAt: new Date(),
+      refundedBy: req.user._id,
+      razorpayRefundId: razorpayRefund.id,
+    };
+    await payment.save();
+
+    logActivity(req, "payment.refund", "Payment", payment._id, payment.invoiceNumber, { amount: refundAmount, reason });
+    success(res, { payment }, "Payment refunded");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── Site branding ─────────────────────────────────────────────────────────────
+
+// GET /api/admin/settings/site-config
+const getSiteConfig = async (req, res, next) => {
+  try {
+    const config = await SiteConfig.getSingleton();
+    success(res, { config });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// PUT /api/admin/settings/site-config
+const updateSiteConfig = async (req, res, next) => {
+  try {
+    const { siteName, logoUrl, supportEmail, social } = req.body;
+    const update = {};
+    if (siteName !== undefined) update.siteName = siteName;
+    if (logoUrl !== undefined) update.logoUrl = logoUrl;
+    if (supportEmail !== undefined) update.supportEmail = supportEmail;
+    if (social !== undefined) update.social = social;
+
+    let config = await SiteConfig.findOne();
+    config = config
+      ? await SiteConfig.findByIdAndUpdate(config._id, update, { new: true, runValidators: true })
+      : await SiteConfig.create(update);
+
+    logActivity(req, "settings.site-config.update", "SiteConfig", config._id, config.siteName, update);
+    success(res, { config }, "Site settings updated");
+  } catch (err) {
+    next(err);
+  }
+};
+
+// GET /api/admin/me/permissions
+const getMyPermissions = async (req, res, next) => {
+  try {
+    const role = req.user.role;
+    const permissions = Object.keys(ADMIN_PERMISSIONS).filter((key) =>
+      ADMIN_PERMISSIONS[key].includes(role)
+    );
+    success(res, { role, permissions });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
+  getMyPermissions,
   getUsers,
   getUser,
   createUser,
@@ -718,4 +913,11 @@ module.exports = {
   getPlans,
   updatePlan,
   getTrendingConverters,
+  getConversions,
+  getConversion,
+  getPayments,
+  getPayment,
+  refundPayment,
+  getSiteConfig,
+  updateSiteConfig,
 };

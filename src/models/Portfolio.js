@@ -51,6 +51,12 @@ const portfolioSchema = new mongoose.Schema(
 
     views: { type: Number, default: 0 },
 
+    // ── Admin moderation ─────────────────────────────────────────────────────
+    featured:     { type: Boolean, default: false, index: true },
+    isHidden:     { type: Boolean, default: false }, // admin-forced unpublish, distinct from the owner's own draft/published toggle
+    hiddenReason: String,
+    deletedAt:    { type: Date, default: null, index: true }, // soft delete
+
     // ── Section-based builder (v2) ──────────────────────────────────────────
     // Ordered, typed sections. `config` is intentionally untyped (Mixed) so new
     // section types/fields can be added later without a schema migration.
@@ -64,6 +70,9 @@ const portfolioSchema = new mongoose.Schema(
         // server-side in the controller from array index before every save.
         order:   { type: Number, default: 0 },
         config:  { type: mongoose.Schema.Types.Mixed, default: {} },
+        // Per-block visual overrides (padding, radius, shadow, alignment, animation, etc.)
+        // set from the property panel. Untyped for the same reason as `config`.
+        style:   { type: mongoose.Schema.Types.Mixed, default: {} },
       },
     ],
 
@@ -74,6 +83,7 @@ const portfolioSchema = new mongoose.Schema(
       mode:        { type: String, enum: ["light", "dark"], default: "dark" },
       layoutWidth: { type: String, enum: ["narrow", "wide"], default: "wide" },
       radius:      { type: String, enum: ["sharp", "rounded", "pill"], default: "rounded" },
+      glassEffect: { type: Boolean, default: false },
     },
 
     // draft vs published: owner always edits `draft`; the public page always

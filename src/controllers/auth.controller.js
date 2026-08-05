@@ -14,6 +14,8 @@ if (!JWT_REFRESH_SECRET) throw new Error("JWT_REFRESH_SECRET environment variabl
 const JWT_EXPIRES_IN     = process.env.JWT_EXPIRES_IN     || "15m";
 const JWT_REFRESH_EXPIRES = process.env.JWT_REFRESH_EXPIRES || "30d";
 
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+
 const signAccessToken = (id) =>
   jwt.sign({ id }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 const signRefreshToken = (id) =>
@@ -76,7 +78,10 @@ const login = async (req, res, next) => {
     // signed; the client doesn't need to wait for the DB to record them.
     // Merge all three field updates into one round-trip, completely off critical path.
     User.findByIdAndUpdate(user._id, {
-      $push: { refreshTokens: { $each: [{ token: refreshToken }], $slice: -5 } },
+      $push: {
+        refreshTokens: { $each: [{ token: refreshToken }], $slice: -5 },
+        loginHistory:  { $each: [{ ip: req.ip, userAgent: req.get("user-agent") }], $slice: -20 },
+      },
       $set:  { lastLoginAt: new Date(), lastLoginIp: req.ip },
       $inc:  { loginCount: 1 },
     }).catch(() => {});
@@ -86,6 +91,89 @@ const login = async (req, res, next) => {
       { user, accessToken, refreshToken, token: accessToken },
       "Login successful",
     );
+  } catch (err) {
+    next(err);
+  }
+};
+
+// POST /api/auth/google
+// Body: { accessToken } — a Google OAuth2 access token obtained client-side via
+// Google Identity Services' token client (scope: openid email profile).
+const googleLogin = async (req, res, next) => {
+  try {
+    const { accessToken: googleAccessToken } = req.body;
+    if (!googleAccessToken) return error(res, "Google access token required", 400);
+
+    // tokeninfo confirms the token was actually issued to *our* OAuth client —
+    // without this check, a valid access token from a different Google app
+    // (with email/profile scope) could be replayed against this endpoint.
+    let tokenInfo;
+    try {
+      const tokenInfoRes = await fetch(
+        `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(googleAccessToken)}`,
+      );
+      if (!tokenInfoRes.ok) return error(res, "Invalid or expired Google token", 401);
+      tokenInfo = await tokenInfoRes.json();
+    } catch {
+      return error(res, "Could not verify Google token", 502);
+    }
+    if (tokenInfo.aud !== GOOGLE_CLIENT_ID) {
+      return error(res, "Google token was not issued for this app", 401);
+    }
+
+    let profile;
+    try {
+      const profileRes = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+      });
+      if (!profileRes.ok) return error(res, "Invalid or expired Google token", 401);
+      profile = await profileRes.json();
+    } catch {
+      return error(res, "Could not fetch Google profile", 502);
+    }
+
+    if (!profile.email || profile.email_verified !== true) {
+      return error(res, "Google account has no verified email", 400);
+    }
+    const email = profile.email.toLowerCase().trim();
+
+    let user = await User.findOne({ email });
+    if (!user) {
+      // Password is required by the schema but never used for Google-only
+      // accounts — a random value keeps the invariant without special-casing it.
+      const randomPassword = crypto.randomBytes(32).toString("hex");
+      const fallbackName = email.split("@")[0];
+      user = await User.create({
+        name: profile.name || (fallbackName.length >= 2 ? fallbackName : "Google User"),
+        email,
+        password: randomPassword,
+        googleId: profile.sub,
+        avatar: profile.picture,
+      });
+      sendWelcomeEmail(user);
+    } else if (!user.googleId) {
+      user.googleId = profile.sub;
+      await user.save({ validateBeforeSave: false });
+    }
+
+    if (user.isBanned) return error(res, "Account banned. Contact support.", 403);
+    if (user.isSuspended && user.suspendedUntil > new Date())
+      return error(res, `Account suspended until ${user.suspendedUntil.toISOString()}`, 403);
+    if (!user.isActive) return error(res, "Account deactivated. Contact support.", 403);
+
+    const accessToken = signAccessToken(user._id);
+    const refreshToken = signRefreshToken(user._id);
+
+    User.findByIdAndUpdate(user._id, {
+      $push: {
+        refreshTokens: { $each: [{ token: refreshToken }], $slice: -5 },
+        loginHistory:  { $each: [{ ip: req.ip, userAgent: req.get("user-agent") }], $slice: -20 },
+      },
+      $set:  { lastLoginAt: new Date(), lastLoginIp: req.ip },
+      $inc:  { loginCount: 1 },
+    }).catch(() => {});
+
+    success(res, { user, accessToken, refreshToken, token: accessToken }, "Signed in with Google");
   } catch (err) {
     next(err);
   }
@@ -139,7 +227,7 @@ const logout = async (req, res, next) => {
   try {
     const { refreshToken } = req.body;
     if (req.user && refreshToken) {
-      req.user.refreshTokens = req.user.refreshTokens.filter(
+      req.user.refreshTokens = (req.user.refreshTokens || []).filter(
         (t) => t.token !== refreshToken,
       );
       await req.user.save({ validateBeforeSave: false });
@@ -256,6 +344,7 @@ const resetPassword = async (req, res, next) => {
 module.exports = {
   register,
   login,
+  googleLogin,
   refresh,
   logout,
   logoutAll,

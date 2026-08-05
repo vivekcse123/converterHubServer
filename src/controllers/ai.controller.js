@@ -222,7 +222,61 @@ const transformText = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// POST /api/ai/resume/ats-analyze — deep AI-powered ATS audit of the full resume
+const atsAnalyze = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { resume } = req.body;
+    if (!resume || typeof resume !== "object") return error(res, "resume is required", 400);
+    const result = await aiService.analyzeResumeAts({ resume });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Resume analyzed");
+  } catch (err) { next(err); }
+};
+
+// POST /api/ai/portfolio/bio — generate a portfolio "About" bio
+const portfolioBio = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { name, role, skills, tone } = req.body;
+    const result = await aiService.generatePortfolioBio({ name, role, skills, tone });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Bio generated");
+  } catch (err) { next(err); }
+};
+
+// POST /api/ai/portfolio/project-description — generate a project description
+const portfolioProjectDescription = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { title, techStack, summary } = req.body;
+    if (!title) return error(res, "title is required", 400);
+    const result = await aiService.generatePortfolioProjectDescription({ title, techStack, summary });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Description generated");
+  } catch (err) { next(err); }
+};
+
+// POST /api/ai/portfolio/rewrite — improve/shorten/expand/tone-shift a text snippet
+const portfolioRewrite = async (req, res, next) => {
+  try {
+    if (req.user && !(await checkAiLimit(req.user)))
+      return error(res, "AI request limit reached for your plan. Upgrade to continue.", 429);
+    const { mode, text } = req.body;
+    if (!mode) return error(res, "mode is required", 400);
+    if (!text || !text.trim()) return error(res, "text is required", 400);
+    const result = await aiService.rewritePortfolioText({ mode, text });
+    await incrementAiUsage(req.user?._id);
+    success(res, result, "Text rewritten");
+  } catch (err) { next(err); }
+};
+
 module.exports = {
+  checkAiLimit,
+  incrementAiUsage,
   summarizePdf,
   chatWithPdf,
   uploadChatPdf,
@@ -231,4 +285,8 @@ module.exports = {
   resumeBullets,
   coverLetter,
   transformText,
+  atsAnalyze,
+  portfolioBio,
+  portfolioProjectDescription,
+  portfolioRewrite,
 };

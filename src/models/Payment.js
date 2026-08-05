@@ -13,6 +13,15 @@ const paymentSchema = new mongoose.Schema(
     razorpaySubscriptionId: String,
     invoiceNumber:          { type: String, unique: true, sparse: true },
     billingCycle:           Number,   // which renewal number this is
+
+    // Populated when an admin issues a refund via the admin panel.
+    refund: {
+      amount:           Number,   // paise
+      reason:           String,
+      refundedAt:       Date,
+      refundedBy:       { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      razorpayRefundId: String,
+    },
   },
   { timestamps: true }
 );

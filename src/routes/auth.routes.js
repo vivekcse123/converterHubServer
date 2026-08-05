@@ -5,6 +5,7 @@ const router = express.Router();
 const {
   register,
   login,
+  googleLogin,
   refresh,
   logout,
   logoutAll,
@@ -25,7 +26,7 @@ router.post(
     body("name").trim().notEmpty().isLength({ min: 2, max: 50 }),
     // Use toLowerCase only — normalizeEmail() strips Gmail dots and breaks
     // round-trip lookups for addresses like john.doe@gmail.com
-    body("email").isEmail().customSanitizer((v) => v.toLowerCase().trim()),
+    body("email").isEmail().customSanitizer((v) => (typeof v === "string" ? v.toLowerCase().trim() : v)),
     body("password").isLength({ min: 8 }),
   ],
   validate,
@@ -36,11 +37,19 @@ router.post(
   "/login",
   authRateLimiter,
   [
-    body("email").isEmail().customSanitizer((v) => v.toLowerCase().trim()),
+    body("email").isEmail().customSanitizer((v) => (typeof v === "string" ? v.toLowerCase().trim() : v)),
     body("password").notEmpty(),
   ],
   validate,
   login,
+);
+
+router.post(
+  "/google",
+  authRateLimiter,
+  [body("accessToken").notEmpty()],
+  validate,
+  googleLogin,
 );
 
 router.post("/refresh", refreshRateLimiter, refresh);
@@ -63,7 +72,7 @@ router.patch(
 router.post(
   "/forgot-password",
   passwordResetLimiter,
-  [body("email").isEmail().customSanitizer((v) => v.toLowerCase().trim())],
+  [body("email").isEmail().customSanitizer((v) => (typeof v === "string" ? v.toLowerCase().trim() : v))],
   validate,
   forgotPassword,
 );

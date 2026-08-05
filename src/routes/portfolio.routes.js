@@ -13,6 +13,8 @@ router.put("/",              requiresPro, portfolio.saveDraft);
 router.post("/publish",      requiresPro, portfolio.publish);
 router.post("/unpublish",    requiresPro, portfolio.unpublish);
 router.post("/upload-image", requiresPro, portfolio.uploadImage);
+router.get("/media",                     portfolio.listMedia);
+router.delete("/media/:filename",        portfolio.deleteMedia);
 router.get("/check-username/:username",  portfolio.checkUsername);
 
 module.exports = router;

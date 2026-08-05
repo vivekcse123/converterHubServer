@@ -140,24 +140,28 @@ const SUBSCRIPTION_PLANS = {
     maxFileSizeMb: 10,
     conversionsPerDay: 5,
     aiRequestsPerDay: 3,
+    atsScansPerDay: 2,
   },
   pro: {
     name: "Pro",
     maxFileSizeMb: 100,
     conversionsPerDay: 100,
     aiRequestsPerDay: 50,
+    atsScansPerDay: 20,
   },
   team: {
     name: "Team",
     maxFileSizeMb: 200,
     conversionsPerDay: 500,
     aiRequestsPerDay: 200,
+    atsScansPerDay: 100,
   },
   enterprise: {
     name: "Enterprise",
     maxFileSizeMb: 500,
     conversionsPerDay: -1,
     aiRequestsPerDay: -1,
+    atsScansPerDay: -1,
   },
 };
 
